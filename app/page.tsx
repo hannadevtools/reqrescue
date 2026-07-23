@@ -37,6 +37,22 @@ function track(event: string, detail?: string) {
   }
 }
 
+function acquisitionSource() {
+  const params = new URLSearchParams(window.location.search);
+  const source = params.get("utm_source");
+  const medium = params.get("utm_medium");
+  if (source) {
+    return [source, medium].filter(Boolean).join("/");
+  }
+
+  try {
+    const referrer = document.referrer ? new URL(document.referrer).hostname : "";
+    return referrer || "direct";
+  } catch {
+    return "direct";
+  }
+}
+
 function downloadText(name: string, text: string, type: string) {
   const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
@@ -805,7 +821,7 @@ export default function Home() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    track("page_view");
+    track("page_view", acquisitionSource());
   }, []);
 
   const finish = useCallback((next: Analysis, source: "file" | "demo") => {
