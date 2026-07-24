@@ -10,6 +10,12 @@ const ALLOWED_EVENTS = new Set([
   "export_markdown",
   "report_helpful",
   "feedback_note",
+  "pro_checkout_click",
+  "pro_activation_success",
+  "pro_activation_error",
+  "pro_pdf_print",
+  "pro_case_saved",
+  "pro_history_copy",
 ]);
 
 export async function POST(request: Request) {
