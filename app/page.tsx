@@ -14,6 +14,8 @@ type View = "landing" | "report";
 type RequestFilter = "failures" | "slow" | "all";
 
 const MAX_FILE_BYTES = 80 * 1024 * 1024;
+const TEAM_PILOT_MAILTO =
+  "mailto:devhanna661@gmail.com?subject=ReqRescue%20founding%20team%20pilot&body=Team%20or%20product%3A%0AApprox.%20HARs%20per%20month%3A%0AWhere%20the%20handoff%20happens%20today%3A%0A";
 
 function track(event: string, detail?: string) {
   try {
@@ -100,8 +102,12 @@ function Header({ report }: { report: boolean }) {
         <a href="#faq">FAQ</a>
         <a href="#roadmap">For teams</a>
       </nav>
-      <a className="github-link" href="#method">
-        Method, not magic <span aria-hidden="true">↗</span>
+      <a
+        className="github-link"
+        href={TEAM_PILOT_MAILTO}
+        onClick={() => track("team_pilot_click", "header")}
+      >
+        Founding pilot · $19/mo <span aria-hidden="true">↗</span>
       </a>
     </header>
   );
@@ -459,7 +465,7 @@ function Roadmap({ onDemo }: { onDemo: () => void }) {
     <section className="section roadmap" id="roadmap">
       <div className="roadmap-copy">
         <p className="eyebrow">
-          <span>Free utility now. Team workflow next.</span>
+          <span>Founding team pilot · 5 spots</span>
           <i />
         </p>
         <h2>The missing layer between HAR export and support escalation.</h2>
@@ -468,23 +474,35 @@ function Roadmap({ onDemo }: { onDemo: () => void }) {
           policies, and one-click intake for support desks—not a subscription
           wall around the basic rescue.
         </p>
-        <button className="button button-primary" onClick={onDemo}>
-          Open the demo case
-        </button>
+        <div className="roadmap-actions">
+          <a
+            className="button button-primary"
+            href={TEAM_PILOT_MAILTO}
+            onClick={() => track("team_pilot_click", "landing")}
+          >
+            Request a 2-week pilot
+          </a>
+          <button className="button button-outline" onClick={onDemo}>
+            Open the demo case
+          </button>
+        </div>
+        <small className="pilot-fineprint">
+          No card today. Keep it after the pilot for $19/month, or walk away.
+        </small>
       </div>
-      <div className="roadmap-list">
-        <div>
-          <span>Now</span>
-          <b>Local HAR triage + evidence exports</b>
-        </div>
-        <div>
-          <span>Next</span>
-          <b>CLI + custom redaction policies</b>
-        </div>
-        <div>
-          <span>Later</span>
-          <b>Zendesk, Intercom, Jira intake</b>
-        </div>
+      <div className="pilot-offer">
+        <header>
+          <span>Founding price</span>
+          <strong>$19<small>/month</small></strong>
+        </header>
+        <p>We build the workflow around one real support queue with you.</p>
+        <ul>
+          <li>Custom secrets and redaction rules</li>
+          <li>Repeatable CLI or batch workflow</li>
+          <li>Jira, GitHub, or support-desk handoff template</li>
+          <li>Direct fixes during the two-week pilot</li>
+        </ul>
+        <small>Five teams only while the workflow is still founder-led.</small>
       </div>
     </section>
   );
@@ -904,6 +922,22 @@ function Report({
                 </div>
               )}
               {noteSent && <small>Received. Thank you.</small>}
+            </section>
+
+            <section className="report-card pilot-card">
+              <span>For support teams · founding pilot</span>
+              <h2>Make every trace arrive ready to act on.</h2>
+              <p>
+                We will fit ReqRescue to one real intake queue for two weeks.
+                No card; $19/month only if your team keeps it.
+              </p>
+              <a
+                className="button button-primary"
+                href={TEAM_PILOT_MAILTO}
+                onClick={() => track("team_pilot_click", "report")}
+              >
+                Ask for the pilot
+              </a>
             </section>
           </aside>
         </section>
