@@ -234,7 +234,10 @@ function ProModal({
                 <input
                   id="license-key"
                   value={licenseKey}
-                  onChange={(event) => setLicenseKey(event.target.value)}
+                  onChange={(event) => {
+                    setLicenseKey(event.target.value);
+                    if (error) setError("");
+                  }}
                   placeholder="XXXX-XXXX-XXXX-XXXX"
                   autoComplete="off"
                   spellCheck={false}
