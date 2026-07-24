@@ -89,19 +89,39 @@ function Logo() {
 }
 
 function Header({ report }: { report: boolean }) {
+  const links = report
+    ? [
+        ["Evidence", "#evidence"],
+        ["Handoff", "#handoff"],
+        ["Feedback", "#feedback"],
+      ]
+    : [
+        ["How it works", "#how-it-works"],
+        ["Privacy", "#privacy"],
+        ["FAQ", "#faq"],
+        ["For teams", "#roadmap"],
+      ];
+
   return (
     <header className="site-header">
       <Logo />
       <nav aria-label="Primary navigation">
-        {report ? (
-          <a href="#evidence">Evidence</a>
-        ) : (
-          <a href="#how-it-works">How it works</a>
-        )}
-        <a href="#privacy">Privacy</a>
-        <a href="#faq">FAQ</a>
-        <a href="#roadmap">For teams</a>
+        {links.map(([label, href]) => (
+          <a href={href} key={href}>
+            {label}
+          </a>
+        ))}
       </nav>
+      <details className="mobile-menu">
+        <summary>Menu</summary>
+        <div>
+          {links.map(([label, href]) => (
+            <a href={href} key={href}>
+              {label}
+            </a>
+          ))}
+        </div>
+      </details>
       <a
         className="github-link"
         href={TEAM_PILOT_MAILTO}
@@ -862,7 +882,7 @@ function Report({
               </p>
             </section>
 
-            <section className="report-card export-card">
+            <section className="report-card export-card" id="handoff">
               <header className="card-header compact">
                 <div>
                   <span className="card-index">04</span>
@@ -892,7 +912,7 @@ function Report({
               </button>
             </section>
 
-            <section className="report-card feedback-card">
+            <section className="report-card feedback-card" id="feedback">
               <p>Did this point you in the right direction?</p>
               <div>
                 <button

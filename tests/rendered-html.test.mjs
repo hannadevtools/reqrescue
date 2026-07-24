@@ -36,6 +36,9 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /Drop a HAR\. Get the case\./);
   assert.match(html, /Nothing is uploaded/);
   assert.match(html, /Run a 15-second demo — no HAR needed/);
+  assert.match(html, /Founding pilot · \$19\/mo/);
+  assert.match(html, /Request a 2-week pilot/);
+  assert.match(html, /class="mobile-menu"/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /How is this different from a HAR viewer or sanitizer/);
   assert.doesNotMatch(html, /react-loading-skeleton|Your site is taking shape/);
