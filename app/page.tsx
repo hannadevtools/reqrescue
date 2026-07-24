@@ -749,7 +749,7 @@ function Landing({
         name: "ReqRescue",
         applicationCategory: "DeveloperApplication",
         operatingSystem: "Any modern web browser",
-        url: "https://reqrescue.funt1k.chatgpt.site/",
+        url: "https://app.reqrescue.workers.dev/",
         description:
           "A free local-first HAR analyzer and sanitizer that creates ranked incident briefs, clean evidence files, and developer-ready bug reports.",
         offers: {

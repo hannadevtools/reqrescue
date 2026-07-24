@@ -40,6 +40,7 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /Get lifetime Pro · \$12/);
   assert.match(html, /One payment\. No ReqRescue account/);
   assert.match(html, /github\.com\/hannadevtools\/reqrescue/);
+  assert.match(html, /https:\/\/app\.reqrescue\.workers\.dev\//);
   assert.match(html, /class="mobile-menu"/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /How is this different from a HAR viewer or sanitizer/);
@@ -55,7 +56,10 @@ test("serves crawler discovery files", async () => {
   const sitemap = await render("/sitemap.xml");
   assert.equal(sitemap.status, 200);
   assert.match(sitemap.headers.get("content-type") ?? "", /^application\/xml\b/i);
-  assert.match(await sitemap.text(), /<loc>https:\/\/reqrescue\./);
+  assert.match(
+    await sitemap.text(),
+    /<loc>https:\/\/app\.reqrescue\.workers\.dev\/<\/loc>/,
+  );
 });
 
 test("returns a controlled response for an unknown route", async () => {

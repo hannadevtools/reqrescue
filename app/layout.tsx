@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const siteUrl = "https://reqrescue.funt1k.chatgpt.site";
+const siteUrl = "https://app.reqrescue.workers.dev";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

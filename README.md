@@ -7,7 +7,7 @@ ReqRescue turns a browser HAR into an actionable incident packet:
 - a Markdown bug report and AI-debugger handoff;
 - an optional print-ready PDF workflow and local case history.
 
-Try the hosted build: **[reqrescue.funt1k.chatgpt.site](https://reqrescue.funt1k.chatgpt.site/)**
+Try the hosted build: **[app.reqrescue.workers.dev](https://app.reqrescue.workers.dev/)**
 
 ## Why this exists
 

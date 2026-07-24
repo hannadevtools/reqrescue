@@ -1,7 +1,7 @@
 const ROBOTS = `User-agent: *
 Allow: /
 
-Sitemap: https://reqrescue.funt1k.chatgpt.site/sitemap.xml
+Sitemap: https://app.reqrescue.workers.dev/sitemap.xml
 `;
 
 export async function GET() {
