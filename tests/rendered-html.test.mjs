@@ -30,13 +30,27 @@ test("server-renders the ReqRescue product shell", async () => {
   const html = await response.text();
   assert.match(
     html,
-    /<title>ReqRescue — Turn a HAR into an actionable incident brief<\/title>/i,
+    /<title>ReqRescue — Free local HAR analyzer, sanitizer &amp; incident brief<\/title>/i,
   );
   assert.match(html, /Stop sending raw traces/);
   assert.match(html, /Drop a HAR\. Get the case\./);
   assert.match(html, /Nothing is uploaded/);
-  assert.match(html, /Try the broken checkout demo/);
+  assert.match(html, /Run a 15-second demo — no HAR needed/);
+  assert.match(html, /application\/ld\+json/);
+  assert.match(html, /How is this different from a HAR viewer or sanitizer/);
   assert.doesNotMatch(html, /react-loading-skeleton|Your site is taking shape/);
+});
+
+test("serves crawler discovery files", async () => {
+  const robots = await render("/robots.txt");
+  assert.equal(robots.status, 200);
+  assert.match(robots.headers.get("content-type") ?? "", /^text\/plain\b/i);
+  assert.match(await robots.text(), /Sitemap: .*\/sitemap\.xml/);
+
+  const sitemap = await render("/sitemap.xml");
+  assert.equal(sitemap.status, 200);
+  assert.match(sitemap.headers.get("content-type") ?? "", /^application\/xml\b/i);
+  assert.match(await sitemap.text(), /<loc>https:\/\/reqrescue\./);
 });
 
 test("returns a controlled response for an unknown route", async () => {

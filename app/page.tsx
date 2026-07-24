@@ -97,6 +97,7 @@ function Header({ report }: { report: boolean }) {
           <a href="#how-it-works">How it works</a>
         )}
         <a href="#privacy">Privacy</a>
+        <a href="#faq">FAQ</a>
         <a href="#roadmap">For teams</a>
       </nav>
       <a className="github-link" href="#method">
@@ -182,7 +183,7 @@ function UploadPanel({
           )}
         </button>
         <button className="button button-quiet" disabled={busy} onClick={onDemo}>
-          Try the broken checkout demo
+          Run a 15-second demo — no HAR needed
         </button>
       </div>
       <p className="file-note">Chrome, Firefox, Edge, Safari · up to 80 MB</p>
@@ -211,7 +212,7 @@ function Hero({
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">
-            <span>Local-first network triage</span>
+            <span>Free HAR analyzer + sanitizer</span>
             <i />
           </p>
           <h1>
@@ -221,7 +222,8 @@ function Hero({
           </h1>
           <p className="hero-lede">
             ReqRescue turns a browser HAR into a ranked incident brief, a
-            scrubbed evidence file, and a bug report your engineer can act on.
+            scrubbed evidence file, and a bug report your engineer can act on—
+            without uploading the trace.
           </p>
           <div className="proof-strip">
             <div>
@@ -266,14 +268,14 @@ function HowItWorks() {
       <div className="method-grid">
         <div className="method-intro">
           <h2>
-            A HAR is evidence.
+            Sanitizing is step one.
             <br />
-            It is not an explanation.
+            Explaining is step two.
           </h2>
           <p>
-            Traditional viewers hand you hundreds of rows. ReqRescue does the
-            first pass an experienced support engineer would do—and shows its
-            work.
+            A viewer hands you hundreds of rows. A sanitizer removes risk.
+            ReqRescue does both, then performs the first triage pass an
+            experienced support engineer would do—and shows its work.
           </p>
         </div>
         <div className="method-list" id="method">
@@ -392,6 +394,66 @@ function Privacy() {
   );
 }
 
+function Faq() {
+  const questions = [
+    {
+      question: "Does ReqRescue upload my HAR file?",
+      answer:
+        "No. Parsing, ranking, redaction, and export generation happen in your browser tab. The server never receives the HAR, its file name, request URLs, headers, or bodies.",
+    },
+    {
+      question: "What sensitive data does it remove?",
+      answer:
+        "ReqRescue strips cookies, authorization headers, API keys, access and refresh tokens, passwords, emails, IP addresses, private hosts, and sensitive request or response body fields. You should still review any exported evidence before sharing it.",
+    },
+    {
+      question: "How is this different from a HAR viewer or sanitizer?",
+      answer:
+        "A viewer helps you inspect requests. A sanitizer removes secrets. ReqRescue also groups failures, ranks evidence-backed suspects, and produces a Markdown incident report plus a clean HAR for engineering or support.",
+    },
+    {
+      question: "Does it claim to know the root cause?",
+      answer:
+        "No. ReqRescue separates observed facts from hypotheses. Each suspect has a confidence level and the exact requests that support it, so an engineer can verify the diagnosis instead of trusting a black box.",
+    },
+    {
+      question: "Can I try it without a real trace?",
+      answer:
+        "Yes. Run the 15-second broken-checkout demo above. It uses a synthetic HAR with repeated authentication failures and fake secrets, so you can inspect the complete report safely.",
+    },
+  ];
+
+  return (
+    <section className="section faq-section" id="faq">
+      <div className="section-kicker">
+        <span>03</span>
+        <p>Trust, before upload</p>
+      </div>
+      <div className="faq-grid">
+        <div>
+          <h2>
+            The questions a sensitive
+            <br />
+            trace deserves.
+          </h2>
+          <p>
+            ReqRescue is deliberately local, deterministic, and explicit about
+            uncertainty. No account is required.
+          </p>
+        </div>
+        <div className="faq-list">
+          {questions.map((item, index) => (
+            <details key={item.question} open={index === 0}>
+              <summary>{item.question}</summary>
+              <p>{item.answer}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Roadmap({ onDemo }: { onDemo: () => void }) {
   return (
     <section className="section roadmap" id="roadmap">
@@ -400,7 +462,7 @@ function Roadmap({ onDemo }: { onDemo: () => void }) {
           <span>Free utility now. Team workflow next.</span>
           <i />
         </p>
-        <h2>Built for the moment support says, “send us a HAR.”</h2>
+        <h2>The missing layer between HAR export and support escalation.</h2>
         <p>
           The web tool stays free. The paid path is a CLI, company redaction
           policies, and one-click intake for support desks—not a subscription
@@ -439,14 +501,67 @@ function Landing({
   onFile: (file: File) => void;
   onDemo: () => void;
 }) {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        name: "ReqRescue",
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "Any modern web browser",
+        url: "https://reqrescue.funt1k.chatgpt.site/",
+        description:
+          "A free local-first HAR analyzer and sanitizer that creates ranked incident briefs, clean evidence files, and developer-ready bug reports.",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+        },
+        featureList: [
+          "Local HAR analysis",
+          "Sensitive data redaction",
+          "Evidence-backed failure ranking",
+          "Sanitized HAR export",
+          "Markdown incident report",
+        ],
+      },
+      {
+        "@type": "FAQPage",
+        mainEntity: [
+          {
+            "@type": "Question",
+            name: "Does ReqRescue upload my HAR file?",
+            acceptedAnswer: {
+              "@type": "Answer",
+              text: "No. Parsing, ranking, redaction, and exports run locally in the browser.",
+            },
+          },
+          {
+            "@type": "Question",
+            name: "How is ReqRescue different from a HAR viewer or sanitizer?",
+            acceptedAnswer: {
+              "@type": "Answer",
+              text: "ReqRescue sanitizes the trace, ranks evidence-backed suspects, and generates a developer-ready incident report.",
+            },
+          },
+        ],
+      },
+    ],
+  };
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
       <Header report={false} />
       <main>
         <Hero busy={busy} error={error} onFile={onFile} onDemo={onDemo} />
         <HowItWorks />
         <BeforeAfter />
         <Privacy />
+        <Faq />
         <Roadmap onDemo={onDemo} />
       </main>
       <Footer />

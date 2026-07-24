@@ -1,18 +1,28 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+const siteUrl = "https://reqrescue.funt1k.chatgpt.site";
+
 export const metadata: Metadata = {
-  title: "ReqRescue — Turn a HAR into an actionable incident brief",
+  metadataBase: new URL(siteUrl),
+  title: "ReqRescue — Free local HAR analyzer, sanitizer & incident brief",
   description:
-    "Local-first HAR triage that ranks likely causes, scrubs secrets, and generates a developer-ready bug report. No upload and no account.",
+    "Analyze and sanitize HAR files locally. Rank likely failures, remove tokens and cookies, export a clean HAR, and create a developer-ready bug report. Free, no upload, no account.",
   applicationName: "ReqRescue",
   keywords: [
     "HAR analyzer",
+    "HAR file analyzer",
     "network debugging",
     "HAR sanitizer",
+    "sanitize HAR file",
+    "safe HAR sharing",
     "bug report generator",
+    "incident brief",
     "web support",
   ],
+  alternates: {
+    canonical: "/",
+  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
@@ -20,7 +30,9 @@ export const metadata: Metadata = {
   openGraph: {
     title: "ReqRescue — Stop sending raw traces",
     description:
-      "Turn a browser HAR into a ranked diagnosis, a scrubbed evidence file, and an actionable bug report—in your browser.",
+      "Analyze and sanitize a browser HAR locally, then turn it into ranked evidence and a developer-ready incident report.",
+    url: siteUrl,
+    siteName: "ReqRescue",
     type: "website",
     images: ["/social-card.png"],
   },

@@ -678,6 +678,80 @@ button {
   color: var(--acid);
 }
 
+.faq-section {
+  padding-bottom: 35px;
+}
+
+.faq-grid {
+  display: grid;
+  gap: 9vw;
+  grid-template-columns: 0.88fr 1.12fr;
+}
+
+.faq-grid > div:first-child {
+  position: sticky;
+  top: 110px;
+}
+
+.faq-grid h2 {
+  font-size: clamp(42px, 4.2vw, 70px);
+  letter-spacing: -0.065em;
+  line-height: 0.97;
+  margin: 0 0 28px;
+}
+
+.faq-grid > div:first-child > p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 520px;
+}
+
+.faq-list {
+  border-top: 1px solid var(--ink);
+}
+
+.faq-list details {
+  border-bottom: 1px solid var(--line);
+}
+
+.faq-list summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  list-style: none;
+  padding: 27px 42px 27px 0;
+  position: relative;
+}
+
+.faq-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-list summary::after {
+  color: var(--signal);
+  content: "+";
+  font-family: var(--mono);
+  font-size: 22px;
+  position: absolute;
+  right: 0;
+  top: 25px;
+}
+
+.faq-list details[open] summary::after {
+  content: "−";
+}
+
+.faq-list details p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin: -4px 48px 28px 0;
+  max-width: 720px;
+}
+
 .roadmap {
   display: grid;
   gap: 9vw;
@@ -1339,9 +1413,14 @@ button {
 
   .method-grid,
   .privacy-section,
+  .faq-grid,
   .roadmap {
     gap: 70px;
     grid-template-columns: 1fr;
+  }
+
+  .faq-grid > div:first-child {
+    position: static;
   }
 
   .privacy-copy > p {
@@ -1434,6 +1513,7 @@ button {
 
   .method-grid,
   .privacy-section,
+  .faq-grid,
   .roadmap {
     gap: 50px;
   }
