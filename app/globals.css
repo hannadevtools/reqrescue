@@ -331,6 +331,21 @@ button {
   transform: translateY(-2px);
 }
 
+.button-demo {
+  background: var(--acid);
+  border-color: var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.button-demo:hover:not(:disabled) {
+  background: var(--signal);
+  box-shadow: 2px 2px 0 var(--ink);
+  color: var(--white);
+  transform: translate(2px, 2px);
+}
+
 .button-quiet {
   background: transparent;
   color: var(--ink);

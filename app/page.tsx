@@ -169,8 +169,11 @@ function UploadPanel({
         redaction locally.
       </p>
       <div className="upload-actions">
+        <button className="button button-demo" disabled={busy} onClick={onDemo}>
+          Run a 15-second demo — no HAR needed
+        </button>
         <button
-          className="button button-primary"
+          className="button button-outline"
           disabled={busy}
           onClick={() => inputRef.current?.click()}
         >
@@ -181,9 +184,6 @@ function UploadPanel({
           ) : (
             "Choose HAR file"
           )}
-        </button>
-        <button className="button button-quiet" disabled={busy} onClick={onDemo}>
-          Run a 15-second demo — no HAR needed
         </button>
       </div>
       <p className="file-note">Chrome, Firefox, Edge, Safari · up to 80 MB</p>
