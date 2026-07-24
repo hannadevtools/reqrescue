@@ -36,8 +36,10 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /Drop a HAR\. Get the case\./);
   assert.match(html, /Nothing is uploaded/);
   assert.match(html, /Run a 15-second demo — no HAR needed/);
-  assert.match(html, /Founding pilot · \$19\/mo/);
-  assert.match(html, /Request a 2-week pilot/);
+  assert.match(html, /Get Pro · \$12/);
+  assert.match(html, /Get lifetime Pro · \$12/);
+  assert.match(html, /One payment\. No ReqRescue account/);
+  assert.match(html, /github\.com\/hannadevtools\/reqrescue/);
   assert.match(html, /class="mobile-menu"/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /How is this different from a HAR viewer or sanitizer/);

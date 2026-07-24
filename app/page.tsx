@@ -12,10 +12,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "landing" | "report";
 type RequestFilter = "failures" | "slow" | "all";
+type StoredCase = {
+  id: string;
+  savedAt: string;
+  title: string;
+  sourceName: string;
+  markdown: string;
+};
 
-const MAX_FILE_BYTES = 80 * 1024 * 1024;
-const TEAM_PILOT_MAILTO =
-  "mailto:devhanna661@gmail.com?subject=ReqRescue%20founding%20team%20pilot&body=Team%20or%20product%3A%0AApprox.%20HARs%20per%20month%3A%0AWhere%20the%20handoff%20happens%20today%3A%0A";
+const FREE_MAX_FILE_BYTES = 80 * 1024 * 1024;
+const PRO_MAX_FILE_BYTES = 250 * 1024 * 1024;
+const GUMROAD_PRODUCT_URL = "https://hannadev.gumroad.com/l/reqrescue-pro";
+const GUMROAD_PRODUCT_ID = "JMi_OpMKayarptn0vFkQtg==";
+const GITHUB_URL = "https://github.com/hannadevtools/reqrescue";
+const PRO_STORAGE_KEY = "reqrescue-pro-unlocked";
+const HISTORY_STORAGE_KEY = "reqrescue-case-history";
 
 function track(event: string, detail?: string) {
   try {
@@ -77,6 +88,17 @@ function safeBaseName(name: string) {
   );
 }
 
+function loadHistory(): StoredCase[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
 function Logo() {
   return (
     <a className="brand" href="#" aria-label="ReqRescue home">
@@ -88,7 +110,161 @@ function Logo() {
   );
 }
 
-function Header({ report }: { report: boolean }) {
+function ProModal({
+  open,
+  unlocked,
+  history,
+  onClose,
+  onUnlock,
+}: {
+  open: boolean;
+  unlocked: boolean;
+  history: StoredCase[];
+  onClose: () => void;
+  onUnlock: (licenseKey: string) => Promise<void>;
+}) {
+  const [licenseKey, setLicenseKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState("");
+
+  if (!open) return null;
+
+  const activate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!licenseKey.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onUnlock(licenseKey);
+      setLicenseKey("");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "That key could not be verified. Check it and try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copySavedCase = async (item: StoredCase) => {
+    await navigator.clipboard.writeText(item.markdown);
+    setCopied(item.id);
+    track("pro_history_copy");
+    window.setTimeout(() => setCopied(""), 1400);
+  };
+
+  return (
+    <div className="pro-modal-backdrop" role="presentation">
+      <section
+        className="pro-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pro-modal-title"
+      >
+        <button className="pro-modal-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+        <p className="eyebrow">
+          <span>{unlocked ? "Pro active on this browser" : "One payment · lifetime unlock"}</span>
+          <i />
+        </p>
+        <h2 id="pro-modal-title">
+          {unlocked ? "Your local workflow is unlocked." : "ReqRescue Pro · $12 once"}
+        </h2>
+
+        {unlocked ? (
+          <>
+            <ul className="pro-feature-list">
+              <li>Print or save complete incident briefs as PDF</li>
+              <li>Analyze local HAR files up to 250 MB</li>
+              <li>Keep up to 10 incident briefs on this device</li>
+            </ul>
+            <div className="case-history">
+              <header>
+                <b>Saved on this device</b>
+                <span>{history.length}/10</span>
+              </header>
+              {history.length ? (
+                history.map((item) => (
+                  <article key={item.id}>
+                    <div>
+                      <b>{item.title}</b>
+                      <small>
+                        {item.sourceName} ·{" "}
+                        {new Date(item.savedAt).toLocaleDateString()}
+                      </small>
+                    </div>
+                    <button onClick={() => copySavedCase(item)}>
+                      {copied === item.id ? "Copied" : "Copy report"}
+                    </button>
+                  </article>
+                ))
+              ) : (
+                <p>Save a generated report and it will appear here.</p>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="pro-modal-copy">
+              The analyzer, sanitizer, Markdown report, and clean HAR stay free.
+              Pro adds convenience exports and local workflow features—without
+              an account or subscription.
+            </p>
+            <ul className="pro-feature-list">
+              <li>Print-ready PDF incident brief</li>
+              <li>250 MB local file limit</li>
+              <li>On-device history for 10 cases</li>
+            </ul>
+            <a
+              className="button button-primary pro-buy-button"
+              href={GUMROAD_PRODUCT_URL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => track("pro_checkout_click", "modal")}
+            >
+              Buy lifetime Pro · $12
+            </a>
+            <form className="license-form" onSubmit={activate}>
+              <label htmlFor="license-key">Already bought it? Paste your license key</label>
+              <div>
+                <input
+                  id="license-key"
+                  value={licenseKey}
+                  onChange={(event) => setLicenseKey(event.target.value)}
+                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button disabled={busy || !licenseKey.trim()}>
+                  {busy ? "Checking…" : "Unlock"}
+                </button>
+              </div>
+              {error && <p role="alert">{error}</p>}
+            </form>
+            <small className="license-privacy">
+              Verification sends only this key to Gumroad. It never sends your
+              HAR, file name, URLs, headers, or bodies.
+            </small>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Header({
+  report,
+  proUnlocked,
+  onOpenPro,
+}: {
+  report: boolean;
+  proUnlocked: boolean;
+  onOpenPro: () => void;
+}) {
   const links = report
     ? [
         ["Evidence", "#evidence"],
@@ -122,13 +298,14 @@ function Header({ report }: { report: boolean }) {
           ))}
         </div>
       </details>
-      <a
-        className="github-link"
-        href={TEAM_PILOT_MAILTO}
-        onClick={() => track("team_pilot_click", "header")}
-      >
-        Founding pilot · $19/mo <span aria-hidden="true">↗</span>
-      </a>
+      <div className="header-actions">
+        <a className="github-link" href={GITHUB_URL} target="_blank" rel="noreferrer">
+          Open source <span aria-hidden="true">↗</span>
+        </a>
+        <button className="pro-link" onClick={onOpenPro}>
+          {proUnlocked ? "Pro unlocked" : "Get Pro · $12"}
+        </button>
+      </div>
     </header>
   );
 }
@@ -148,11 +325,13 @@ function UploadPanel({
   error,
   onFile,
   onDemo,
+  maxFileBytes,
 }: {
   busy: boolean;
   error: string;
   onFile: (file: File) => void;
   onDemo: () => void;
+  maxFileBytes: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -212,7 +391,9 @@ function UploadPanel({
           )}
         </button>
       </div>
-      <p className="file-note">Chrome, Firefox, Edge, Safari · up to 80 MB</p>
+      <p className="file-note">
+        Chrome, Firefox, Edge, Safari · up to {Math.round(maxFileBytes / 1024 / 1024)} MB
+      </p>
       {error && (
         <div className="upload-error" role="alert">
           <b>Couldn’t inspect that file.</b> {error}
@@ -227,11 +408,13 @@ function Hero({
   error,
   onFile,
   onDemo,
+  maxFileBytes,
 }: {
   busy: boolean;
   error: string;
   onFile: (file: File) => void;
   onDemo: () => void;
+  maxFileBytes: number;
 }) {
   return (
     <>
@@ -266,7 +449,13 @@ function Hero({
             </div>
           </div>
         </div>
-        <UploadPanel busy={busy} error={error} onFile={onFile} onDemo={onDemo} />
+        <UploadPanel
+          busy={busy}
+          error={error}
+          onFile={onFile}
+          onDemo={onDemo}
+          maxFileBytes={maxFileBytes}
+        />
       </section>
 
       <section className="signal-band" aria-label="Product outcomes">
@@ -480,49 +669,53 @@ function Faq() {
   );
 }
 
-function Roadmap({ onDemo }: { onDemo: () => void }) {
+function Roadmap({
+  onDemo,
+  onOpenPro,
+  proUnlocked,
+}: {
+  onDemo: () => void;
+  onOpenPro: () => void;
+  proUnlocked: boolean;
+}) {
   return (
     <section className="section roadmap" id="roadmap">
       <div className="roadmap-copy">
         <p className="eyebrow">
-          <span>Founding team pilot · 5 spots</span>
+          <span>ReqRescue Pro · one-time unlock</span>
           <i />
         </p>
-        <h2>The missing layer between HAR export and support escalation.</h2>
+        <h2>Keep the rescue free. Pay once for the workflow.</h2>
         <p>
-          The web tool stays free. The paid path is a CLI, company redaction
-          policies, and one-click intake for support desks—not a subscription
-          wall around the basic rescue.
+          Analysis, redaction, clean HAR, and Markdown export stay free and open
+          source. Pro is a lifetime convenience unlock for PDF handoff, larger
+          local files, and case history on this device.
         </p>
         <div className="roadmap-actions">
-          <a
-            className="button button-primary"
-            href={TEAM_PILOT_MAILTO}
-            onClick={() => track("team_pilot_click", "landing")}
-          >
-            Request a 2-week pilot
-          </a>
+          <button className="button button-primary" onClick={onOpenPro}>
+            {proUnlocked ? "View your Pro history" : "Get lifetime Pro · $12"}
+          </button>
           <button className="button button-outline" onClick={onDemo}>
             Open the demo case
           </button>
         </div>
         <small className="pilot-fineprint">
-          No card today. Keep it after the pilot for $19/month, or walk away.
+          One payment. No ReqRescue account. 30-day money-back guarantee.
         </small>
       </div>
       <div className="pilot-offer">
         <header>
-          <span>Founding price</span>
-          <strong>$19<small>/month</small></strong>
+          <span>Lifetime price</span>
+          <strong>$12<small> once</small></strong>
         </header>
-        <p>We build the workflow around one real support queue with you.</p>
+        <p>For people who use HARs often enough to want a faster handoff.</p>
         <ul>
-          <li>Custom secrets and redaction rules</li>
-          <li>Repeatable CLI or batch workflow</li>
-          <li>Jira, GitHub, or support-desk handoff template</li>
-          <li>Direct fixes during the two-week pilot</li>
+          <li>Print or save the full incident brief as PDF</li>
+          <li>Analyze files up to 250 MB, locally</li>
+          <li>Save 10 case reports on this device</li>
+          <li>Future Pro convenience exports included</li>
         </ul>
-        <small>Five teams only while the workflow is still founder-led.</small>
+        <small>The free core is not crippled, timed, or account-gated.</small>
       </div>
     </section>
   );
@@ -533,11 +726,17 @@ function Landing({
   error,
   onFile,
   onDemo,
+  maxFileBytes,
+  proUnlocked,
+  onOpenPro,
 }: {
   busy: boolean;
   error: string;
   onFile: (file: File) => void;
   onDemo: () => void;
+  maxFileBytes: number;
+  proUnlocked: boolean;
+  onOpenPro: () => void;
 }) {
   const structuredData = {
     "@context": "https://schema.org",
@@ -593,14 +792,24 @@ function Landing({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
-      <Header report={false} />
+      <Header report={false} proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
       <main>
-        <Hero busy={busy} error={error} onFile={onFile} onDemo={onDemo} />
+        <Hero
+          busy={busy}
+          error={error}
+          onFile={onFile}
+          onDemo={onDemo}
+          maxFileBytes={maxFileBytes}
+        />
         <HowItWorks />
         <BeforeAfter />
         <Privacy />
         <Faq />
-        <Roadmap onDemo={onDemo} />
+        <Roadmap
+          onDemo={onDemo}
+          onOpenPro={onOpenPro}
+          proUnlocked={proUnlocked}
+        />
       </main>
       <Footer />
     </>
@@ -631,15 +840,22 @@ function Confidence({ value }: { value: "high" | "medium" | "low" }) {
 function Report({
   analysis,
   onReset,
+  proUnlocked,
+  onOpenPro,
+  onSaveCase,
 }: {
   analysis: Analysis;
   onReset: () => void;
+  proUnlocked: boolean;
+  onOpenPro: () => void;
+  onSaveCase: (analysis: Analysis) => void;
 }) {
   const [filter, setFilter] = useState<RequestFilter>("failures");
   const [copied, setCopied] = useState("");
   const [feedback, setFeedback] = useState<"yes" | "no" | "">("");
   const [note, setNote] = useState("");
   const [noteSent, setNoteSent] = useState(false);
+  const [caseSaved, setCaseSaved] = useState(false);
 
   const rows = useMemo(() => {
     if (filter === "failures") return analysis.requests.filter((row) => row.failure);
@@ -690,9 +906,27 @@ function Report({
     setNote("");
   };
 
+  const printReport = () => {
+    if (!proUnlocked) {
+      onOpenPro();
+      return;
+    }
+    track("pro_pdf_print");
+    window.print();
+  };
+
+  const saveCase = () => {
+    if (!proUnlocked) {
+      onOpenPro();
+      return;
+    }
+    onSaveCase(analysis);
+    setCaseSaved(true);
+  };
+
   return (
     <>
-      <Header report />
+      <Header report proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
       <main className="report-shell">
         <section className="report-heading">
           <div>
@@ -717,6 +951,12 @@ function Report({
             </button>
             <button className="button button-outline" onClick={exportReport}>
               Download report
+            </button>
+            <button className="button button-outline" onClick={printReport}>
+              {proUnlocked ? "Print / save PDF" : "PDF · Pro"}
+            </button>
+            <button className="button button-outline" onClick={saveCase}>
+              {caseSaved ? "Saved locally" : proUnlocked ? "Save case" : "History · Pro"}
             </button>
           </div>
         </section>
@@ -945,19 +1185,18 @@ function Report({
             </section>
 
             <section className="report-card pilot-card">
-              <span>For support teams · founding pilot</span>
-              <h2>Make every trace arrive ready to act on.</h2>
+              <span>Lifetime Pro · $12 once</span>
+              <h2>Save the brief, not another subscription.</h2>
               <p>
-                We will fit ReqRescue to one real intake queue for two weeks.
-                No card; $19/month only if your team keeps it.
+                Add PDF handoff, larger local files, and on-device history. The
+                analyzer and sanitizer stay free and open source.
               </p>
-              <a
+              <button
                 className="button button-primary"
-                href={TEAM_PILOT_MAILTO}
-                onClick={() => track("team_pilot_click", "report")}
+                onClick={onOpenPro}
               >
-                Ask for the pilot
-              </a>
+                {proUnlocked ? "Open Pro history" : "Unlock lifetime Pro"}
+              </button>
             </section>
           </aside>
         </section>
@@ -988,9 +1227,14 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [proUnlocked, setProUnlocked] = useState(false);
+  const [proOpen, setProOpen] = useState(false);
+  const [history, setHistory] = useState<StoredCase[]>([]);
 
   useEffect(() => {
     track("page_view", acquisitionSource());
+    setProUnlocked(localStorage.getItem(PRO_STORAGE_KEY) === "true");
+    setHistory(loadHistory());
   }, []);
 
   const finish = useCallback((next: Analysis, source: "file" | "demo") => {
@@ -1005,8 +1249,13 @@ export default function Home() {
   const handleFile = useCallback(
     async (file: File) => {
       setError("");
-      if (file.size > MAX_FILE_BYTES) {
-        setError("The current browser build accepts files up to 80 MB.");
+      const maxBytes = proUnlocked ? PRO_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES;
+      if (file.size > maxBytes) {
+        setError(
+          proUnlocked
+            ? "This browser accepts Pro files up to 250 MB."
+            : "The free build accepts up to 80 MB. Lifetime Pro raises the local limit to 250 MB.",
+        );
         return;
       }
       setBusy(true);
@@ -1021,7 +1270,7 @@ export default function Home() {
         track("analysis_error");
       }
     },
-    [finish],
+    [finish, proUnlocked],
   );
 
   const handleDemo = useCallback(() => {
@@ -1044,9 +1293,92 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "instant" });
   };
 
-  return view === "report" && analysis ? (
-    <Report analysis={analysis} onReset={reset} />
-  ) : (
-    <Landing busy={busy} error={error} onFile={handleFile} onDemo={handleDemo} />
+  const unlockPro = async (rawKey: string) => {
+    const licenseKey = rawKey.trim();
+    const body = new URLSearchParams({
+      product_id: GUMROAD_PRODUCT_ID,
+      license_key: licenseKey,
+      increment_uses_count: "false",
+    });
+    const response = await fetch("https://api.gumroad.com/v2/licenses/verify", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+
+    if (!response.ok) {
+      track("pro_activation_error", "invalid");
+      throw new Error("That license key was not accepted. Copy it from your Gumroad receipt.");
+    }
+
+    const result = (await response.json()) as {
+      success?: boolean;
+      purchase?: {
+        product_id?: string;
+        refunded?: boolean;
+        disputed?: boolean;
+        chargebacked?: boolean;
+      };
+    };
+    const purchase = result.purchase;
+    if (
+      !result.success ||
+      purchase?.product_id !== GUMROAD_PRODUCT_ID ||
+      purchase.refunded ||
+      purchase.disputed ||
+      purchase.chargebacked
+    ) {
+      track("pro_activation_error", "inactive");
+      throw new Error("This purchase is not active. Check the key or the Gumroad receipt.");
+    }
+
+    localStorage.setItem(PRO_STORAGE_KEY, "true");
+    setProUnlocked(true);
+    track("pro_activation_success");
+  };
+
+  const saveCaseToHistory = (item: Analysis) => {
+    const stored: StoredCase = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      savedAt: new Date().toISOString(),
+      title: item.title,
+      sourceName: item.sourceName,
+      markdown: item.markdown,
+    };
+    const next = [stored, ...loadHistory()].slice(0, 10);
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
+    setHistory(next);
+    track("pro_case_saved");
+  };
+
+  return (
+    <>
+      {view === "report" && analysis ? (
+        <Report
+          analysis={analysis}
+          onReset={reset}
+          proUnlocked={proUnlocked}
+          onOpenPro={() => setProOpen(true)}
+          onSaveCase={saveCaseToHistory}
+        />
+      ) : (
+        <Landing
+          busy={busy}
+          error={error}
+          onFile={handleFile}
+          onDemo={handleDemo}
+          maxFileBytes={proUnlocked ? PRO_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES}
+          proUnlocked={proUnlocked}
+          onOpenPro={() => setProOpen(true)}
+        />
+      )}
+      <ProModal
+        open={proOpen}
+        unlocked={proUnlocked}
+        history={history}
+        onClose={() => setProOpen(false)}
+        onUnlock={unlockPro}
+      />
+    </>
   );
 }
