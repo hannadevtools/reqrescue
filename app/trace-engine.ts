@@ -714,6 +714,34 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
   };
 }
 
+export function buildSanitizedPreview(analysis: Pick<Analysis, "sanitized">): string {
+  const selected = [...analysis.sanitized.log.entries]
+    .sort((a, b) => {
+      const aFailed = (a.response?.status ?? 0) >= 400 || Boolean(a._error);
+      const bFailed = (b.response?.status ?? 0) >= 400 || Boolean(b._error);
+      return Number(bFailed) - Number(aFailed);
+    })
+    .slice(0, 2)
+    .map((entry) => ({
+      request: {
+        method: entry.request?.method ?? "GET",
+        url: entry.request?.url ?? "",
+        headers: entry.request?.headers?.slice(0, 8) ?? [],
+        cookies: entry.request?.cookies?.slice(0, 4) ?? [],
+        query: entry.request?.queryString?.slice(0, 6) ?? [],
+        body: entry.request?.postData?.text?.slice(0, 500) || undefined,
+      },
+      response: {
+        status: entry.response?.status ?? 0,
+        headers: entry.response?.headers?.slice(0, 8) ?? [],
+        cookies: entry.response?.cookies?.slice(0, 4) ?? [],
+        body: entry.response?.content?.text?.slice(0, 500) || undefined,
+      },
+    }));
+
+  return JSON.stringify({ preview: "sanitized locally", requests: selected }, null, 2);
+}
+
 export function buildDemoHar(): HarFile {
   const started = new Date(Date.now() - 14_000).toISOString();
   const entry = (

@@ -4,6 +4,7 @@ import {
   type Analysis,
   analyzeHar,
   buildDemoHar,
+  buildSanitizedPreview,
   formatBytes,
   formatDuration,
   parseHar,
@@ -907,35 +908,6 @@ function Confidence({ value }: { value: "high" | "medium" | "low" }) {
   return <span className={`confidence confidence-${value}`}>{value} confidence</span>;
 }
 
-function sanitizedPreview(analysis: Analysis) {
-  const entries = analysis.sanitized.log.entries;
-  const selected = [...entries]
-    .sort((a, b) => {
-      const aFailed = (a.response?.status ?? 0) >= 400 || Boolean(a._error);
-      const bFailed = (b.response?.status ?? 0) >= 400 || Boolean(b._error);
-      return Number(bFailed) - Number(aFailed);
-    })
-    .slice(0, 2)
-    .map((entry) => ({
-      request: {
-        method: entry.request?.method ?? "GET",
-        url: entry.request?.url ?? "",
-        headers: entry.request?.headers?.slice(0, 8) ?? [],
-        cookies: entry.request?.cookies?.slice(0, 4) ?? [],
-        query: entry.request?.queryString?.slice(0, 6) ?? [],
-        body: entry.request?.postData?.text?.slice(0, 500) || undefined,
-      },
-      response: {
-        status: entry.response?.status ?? 0,
-        headers: entry.response?.headers?.slice(0, 8) ?? [],
-        cookies: entry.response?.cookies?.slice(0, 4) ?? [],
-        body: entry.response?.content?.text?.slice(0, 500) || undefined,
-      },
-    }));
-
-  return JSON.stringify({ preview: "sanitized locally", requests: selected }, null, 2);
-}
-
 function Report({
   analysis,
   onReset,
@@ -955,7 +927,7 @@ function Report({
   const [note, setNote] = useState("");
   const [noteSent, setNoteSent] = useState(false);
   const [caseSaved, setCaseSaved] = useState(false);
-  const preview = useMemo(() => sanitizedPreview(analysis), [analysis]);
+  const preview = useMemo(() => buildSanitizedPreview(analysis), [analysis]);
 
   const rows = useMemo(() => {
     if (filter === "failures") return analysis.requests.filter((row) => row.failure);

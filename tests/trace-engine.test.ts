@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   analyzeHar,
   buildDemoHar,
+  buildSanitizedPreview,
   parseHar,
   sanitizeHar,
 } from "../app/trace-engine";
@@ -30,9 +31,21 @@ test("removes the known secrets and PII in the demo HAR", () => {
   assert.match(clean, /\[REDACTED/);
 });
 
+test("builds the preview only from sanitized evidence", () => {
+  const analysis = analyzeHar(buildDemoHar(), "demo.har");
+  const preview = buildSanitizedPreview(analysis);
+  const parsed = JSON.parse(preview) as { requests: unknown[] };
+
+  assert.equal(parsed.requests.length, 2);
+  assert.match(preview, /\[REDACTED/);
+  assert.doesNotMatch(preview, /alex@example\.com/);
+  assert.doesNotMatch(preview, /sess_live_demo/);
+  assert.doesNotMatch(preview, /not-a-real-password/);
+});
+
 test("parses a real HAR fixture and identifies the 403", async () => {
   const text = await readFile(
-    new URL("../work/qa-sample.har", import.meta.url),
+    new URL("./fixtures/qa-sample.har", import.meta.url),
     "utf8",
   );
   const analysis = analyzeHar(parseHar(text), "qa-sample.har");
