@@ -397,6 +397,27 @@ function UploadPanel({
       <p className="file-note">
         Chrome, Firefox, Edge, Safari · up to {Math.round(maxFileBytes / 1024 / 1024)} MB
       </p>
+      <details className="har-help">
+        <summary>What is a HAR — and how do I get one?</summary>
+        <div>
+          <p>
+            A HAR is a browser recording of the network requests made while a
+            page loads or a problem happens. It helps support and engineering
+            see failed API calls, slow requests, redirects, and status codes.
+          </p>
+          <ol>
+            <li>Open the broken page, then open Developer Tools.</li>
+            <li>Select <b>Network</b>, reload the page, and reproduce the issue.</li>
+            <li>
+              Export or save all requests as <b>HAR</b>, then open that file here.
+            </li>
+          </ol>
+          <small>
+            Chrome / Edge: F12 → Network → Export HAR. Firefox: F12 → Network →
+            Save all as HAR.
+          </small>
+        </div>
+      </details>
       {error && (
         <div className="upload-error" role="alert">
           <b>Couldn’t inspect that file.</b> {error}
@@ -473,6 +494,51 @@ function Hero({
         <span>SLOW REQUESTS</span>
       </section>
     </>
+  );
+}
+
+function PlainEnglish() {
+  return (
+    <section className="section plain-english" aria-labelledby="plain-english-title">
+      <div className="section-kicker">
+        <span>00</span>
+        <p>ReqRescue, in plain English</p>
+      </div>
+      <div className="plain-english-head">
+        <h2 id="plain-english-title">A safer, faster handoff when a website breaks.</h2>
+        <p>
+          ReqRescue reads a browser network recording, finds the requests most
+          likely connected to the failure, removes common secrets, and packages
+          the useful evidence for the person who has to fix it.
+        </p>
+      </div>
+      <div className="plain-english-grid">
+        <article>
+          <span>WHAT GOES IN</span>
+          <h3>A HAR network recording</h3>
+          <p>
+            A standard file exported from your browser after you reproduce a
+            broken checkout, login, upload, dashboard, or other web flow.
+          </p>
+        </article>
+        <article>
+          <span>WHO IT IS FOR</span>
+          <h3>Support, QA, developers, and technical founders</h3>
+          <p>
+            Anyone who needs to turn “it does not work” into evidence an
+            engineer can inspect without another round of questions.
+          </p>
+        </article>
+        <article>
+          <span>WHAT COMES OUT</span>
+          <h3>A diagnosis, clean HAR, and ready-to-send report</h3>
+          <p>
+            Ranked suspects with confidence, cited request evidence, detected
+            privacy risks, and a Markdown handoff for Jira, GitHub, Slack, or AI.
+          </p>
+        </article>
+      </div>
+    </section>
   );
 }
 
@@ -804,6 +870,7 @@ function Landing({
           onDemo={onDemo}
           maxFileBytes={maxFileBytes}
         />
+        <PlainEnglish />
         <HowItWorks />
         <BeforeAfter />
         <Privacy />
@@ -840,6 +907,35 @@ function Confidence({ value }: { value: "high" | "medium" | "low" }) {
   return <span className={`confidence confidence-${value}`}>{value} confidence</span>;
 }
 
+function sanitizedPreview(analysis: Analysis) {
+  const entries = analysis.sanitized.log.entries;
+  const selected = [...entries]
+    .sort((a, b) => {
+      const aFailed = (a.response?.status ?? 0) >= 400 || Boolean(a._error);
+      const bFailed = (b.response?.status ?? 0) >= 400 || Boolean(b._error);
+      return Number(bFailed) - Number(aFailed);
+    })
+    .slice(0, 2)
+    .map((entry) => ({
+      request: {
+        method: entry.request?.method ?? "GET",
+        url: entry.request?.url ?? "",
+        headers: entry.request?.headers?.slice(0, 8) ?? [],
+        cookies: entry.request?.cookies?.slice(0, 4) ?? [],
+        query: entry.request?.queryString?.slice(0, 6) ?? [],
+        body: entry.request?.postData?.text?.slice(0, 500) || undefined,
+      },
+      response: {
+        status: entry.response?.status ?? 0,
+        headers: entry.response?.headers?.slice(0, 8) ?? [],
+        cookies: entry.response?.cookies?.slice(0, 4) ?? [],
+        body: entry.response?.content?.text?.slice(0, 500) || undefined,
+      },
+    }));
+
+  return JSON.stringify({ preview: "sanitized locally", requests: selected }, null, 2);
+}
+
 function Report({
   analysis,
   onReset,
@@ -859,6 +955,7 @@ function Report({
   const [note, setNote] = useState("");
   const [noteSent, setNoteSent] = useState(false);
   const [caseSaved, setCaseSaved] = useState(false);
+  const preview = useMemo(() => sanitizedPreview(analysis), [analysis]);
 
   const rows = useMemo(() => {
     if (filter === "failures") return analysis.requests.filter((row) => row.failure);
@@ -1125,10 +1222,30 @@ function Report({
               </p>
             </section>
 
+            <details className="report-card sanitized-preview">
+              <summary>
+                <span>
+                  <i className="card-index">04</i>
+                  <b>Preview sanitized data</b>
+                </span>
+                <em>Inspect before export</em>
+              </summary>
+              <div>
+                <p>
+                  This is a small preview of the cleaned copy generated in your
+                  browser. Search for <code>[REDACTED]</code> and review any
+                  product-specific values before sharing the full export.
+                </p>
+                <pre>
+                  <code>{preview}</code>
+                </pre>
+              </div>
+            </details>
+
             <section className="report-card export-card" id="handoff">
               <header className="card-header compact">
                 <div>
-                  <span className="card-index">04</span>
+                  <span className="card-index">05</span>
                   <h2>Hand it off</h2>
                 </div>
               </header>
@@ -1236,8 +1353,11 @@ export default function Home() {
 
   useEffect(() => {
     track("page_view", acquisitionSource());
-    setProUnlocked(localStorage.getItem(PRO_STORAGE_KEY) === "true");
-    setHistory(loadHistory());
+    const initialization = window.setTimeout(() => {
+      setProUnlocked(localStorage.getItem(PRO_STORAGE_KEY) === "true");
+      setHistory(loadHistory());
+    }, 0);
+    return () => window.clearTimeout(initialization);
   }, []);
 
   const finish = useCallback((next: Analysis, source: "file" | "demo") => {

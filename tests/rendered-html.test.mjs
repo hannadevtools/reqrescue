@@ -36,6 +36,9 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /Drop a HAR\. Get the case\./);
   assert.match(html, /Nothing is uploaded/);
   assert.match(html, /Run a 15-second demo — no HAR needed/);
+  assert.match(html, /What is a HAR — and how do I get one\?/);
+  assert.match(html, /ReqRescue, in plain English/);
+  assert.match(html, /Support, QA, developers, and technical founders/);
   assert.match(html, /Get Pro · \$12/);
   assert.match(html, /Get lifetime Pro · \$12/);
   assert.match(html, /One payment\. No ReqRescue account/);

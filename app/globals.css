@@ -458,6 +458,75 @@ button {
   text-transform: uppercase;
 }
 
+.har-help {
+  border-top: 1px solid var(--line);
+  margin: 21px auto 0;
+  max-width: 410px;
+  padding-top: 17px;
+  text-align: left;
+}
+
+.har-help summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  list-style: none;
+  text-align: center;
+  text-decoration: underline;
+  text-decoration-color: var(--line-dark);
+  text-underline-offset: 4px;
+}
+
+.har-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.har-help summary::after {
+  color: var(--signal);
+  content: " +";
+  font-family: var(--mono);
+}
+
+.har-help[open] summary::after {
+  content: " −";
+}
+
+.har-help > div {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  margin-top: 15px;
+  padding: 16px;
+}
+
+.har-help p,
+.har-help li,
+.har-help small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.har-help p {
+  margin: 0;
+}
+
+.har-help ol {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding-left: 18px;
+}
+
+.har-help b {
+  color: var(--ink);
+}
+
+.har-help small {
+  display: block;
+  font-family: var(--mono);
+}
+
 .upload-error {
   background: var(--signal-soft);
   border-left: 3px solid var(--signal);
@@ -969,6 +1038,71 @@ button {
   justify-self: end;
 }
 
+.plain-english {
+  background: var(--white);
+}
+
+.plain-english-head {
+  align-items: end;
+  display: grid;
+  gap: 70px;
+  grid-template-columns: 1.15fr 0.85fr;
+  margin-bottom: 58px;
+}
+
+.plain-english-head h2 {
+  font-size: clamp(42px, 5vw, 74px);
+  letter-spacing: -0.06em;
+  line-height: 0.98;
+  margin: 0;
+  max-width: 850px;
+}
+
+.plain-english-head > p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.65;
+  margin: 0;
+  max-width: 620px;
+}
+
+.plain-english-grid {
+  border: 1px solid var(--line-dark);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.plain-english-grid article {
+  min-height: 245px;
+  padding: 31px;
+}
+
+.plain-english-grid article + article {
+  border-left: 1px solid var(--line-dark);
+}
+
+.plain-english-grid span {
+  color: var(--signal);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.plain-english-grid h3 {
+  font-size: 22px;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  margin: 46px 0 13px;
+}
+
+.plain-english-grid p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+
 /* Report */
 
 .report-shell {
@@ -1426,6 +1560,81 @@ button {
   margin: 16px 24px 22px;
 }
 
+.sanitized-preview {
+  overflow: hidden;
+}
+
+.sanitized-preview > summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 68px;
+  padding: 0 24px;
+}
+
+.sanitized-preview > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sanitized-preview > summary span {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.sanitized-preview > summary i {
+  font-style: normal;
+}
+
+.sanitized-preview > summary b {
+  font-size: 12px;
+}
+
+.sanitized-preview > summary em {
+  color: var(--signal);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sanitized-preview[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.sanitized-preview > div {
+  padding: 18px;
+}
+
+.sanitized-preview p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+  margin: 0 0 13px;
+}
+
+.sanitized-preview p code {
+  color: var(--signal);
+  font-family: var(--mono);
+}
+
+.sanitized-preview pre {
+  background: var(--night);
+  color: #dfe4da;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 330px;
+  overflow: auto;
+  padding: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .export-card > button {
   align-items: center;
   background: transparent;
@@ -1816,6 +2025,7 @@ button {
   }
 
   .method-grid,
+  .plain-english-head,
   .privacy-section,
   .faq-grid,
   .roadmap {
@@ -1935,6 +2145,7 @@ button {
   }
 
   .method-grid,
+  .plain-english-head,
   .privacy-section,
   .faq-grid,
   .roadmap {
@@ -1943,6 +2154,19 @@ button {
 
   .comparison {
     grid-template-columns: 1fr;
+  }
+
+  .plain-english-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .plain-english-grid article {
+    min-height: 0;
+  }
+
+  .plain-english-grid article + article {
+    border-left: 0;
+    border-top: 1px solid var(--line-dark);
   }
 
   .comparison-arrow {

@@ -9,6 +9,17 @@ ReqRescue turns a browser HAR into an actionable incident packet:
 
 Try the hosted build: **[app.reqrescue.workers.dev](https://app.reqrescue.workers.dev/)**
 
+## What is a HAR?
+
+A HAR (HTTP Archive) is a standard JSON recording of the network requests a
+browser made while a page loaded or a problem was reproduced. Support, QA, and
+engineering teams use it to inspect failed API calls, slow requests, redirects,
+and response status codes.
+
+In Chrome or Edge, open **Developer Tools → Network**, reproduce the issue, and
+choose **Export HAR**. In Firefox, use **Developer Tools → Network → Save all as
+HAR**.
+
 ## Why this exists
 
 HAR sanitizers remove risk. HAR viewers expose rows. ReqRescue does both of
@@ -25,7 +36,8 @@ HAR parsing, ranking, redaction, and export generation run in the browser:
 - [`app/trace-engine.ts`](app/trace-engine.ts) contains the parser, heuristics,
   redaction, and report generation.
 - [`app/page.tsx`](app/page.tsx) reads files with the browser `File` API and
-  passes their text directly to that engine.
+  passes their text directly to that engine. It also renders a small preview of
+  the sanitized copy before export.
 - [`app/api/event/route.ts`](app/api/event/route.ts) accepts only an anonymous
   event name, session identifier, and short acquisition detail.
 

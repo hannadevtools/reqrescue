@@ -528,7 +528,13 @@ function buildSuspects(rows: RequestRow[], p95Duration: number): Suspect[] {
   return suspects
     .sort((a, b) => b.score - a.score)
     .slice(0, 5)
-    .map(({ score: _score, ...suspect }, index) => ({ ...suspect, rank: index + 1 }));
+    .map((suspect, index) => ({
+      rank: index + 1,
+      confidence: suspect.confidence,
+      title: suspect.title,
+      explanation: suspect.explanation,
+      evidence: suspect.evidence,
+    }));
 }
 
 function markdownEscape(value: string): string {
