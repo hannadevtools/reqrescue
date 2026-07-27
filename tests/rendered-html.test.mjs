@@ -48,7 +48,10 @@ test("server-renders the ReqRescue product shell", async () => {
     /<link rel="canonical" href="https:\/\/app\.reqrescue\.workers\.dev\/"\/?>/,
   );
   assert.match(html, /class="mobile-menu"/);
-  assert.doesNotMatch(html, /application\/ld\+json/);
+  assert.match(html, /type="application\/ld\+json"/);
+  assert.match(html, /"@type":\["SoftwareApplication","WebApplication"\]/);
+  assert.match(html, /"isAccessibleForFree":true/);
+  assert.match(html, /github\.com\/hannadevtools\/reqrescue/);
   assert.match(html, /How is this different from a HAR viewer or sanitizer/);
   assert.doesNotMatch(html, /react-loading-skeleton|Your site is taking shape/);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");

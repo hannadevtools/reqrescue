@@ -2,6 +2,37 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 const siteUrl = "https://app.reqrescue.workers.dev";
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": ["SoftwareApplication", "WebApplication"],
+  name: "ReqRescue",
+  url: siteUrl,
+  applicationCategory: "DeveloperApplication",
+  applicationSubCategory: "Web debugging and incident response",
+  operatingSystem: "Any",
+  browserRequirements: "Requires a modern browser with Web Worker support",
+  isAccessibleForFree: true,
+  description:
+    "A local-first HAR analyzer and sanitizer that ranks likely failure causes, removes sensitive values, and exports a clean HAR plus a developer-ready incident report.",
+  featureList: [
+    "Local browser-only HAR analysis",
+    "Cookie, token, email, IP address, and request-body redaction",
+    "Evidence-backed failure ranking",
+    "Sanitized HAR export",
+    "Markdown incident report export",
+  ],
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "USD",
+  },
+  codeRepository: "https://github.com/hannadevtools/reqrescue",
+  license: "https://opensource.org/license/mit",
+};
+const structuredDataJson = JSON.stringify(structuredData).replace(
+  /</g,
+  "\\u003c",
+);
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -22,6 +53,17 @@ export const metadata: Metadata = {
   ],
   alternates: {
     canonical: "/",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
   },
   icons: {
     icon: [
@@ -60,7 +102,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: structuredDataJson }}
+        />
+      </body>
     </html>
   );
 }
