@@ -43,7 +43,10 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /Voluntary honorware/);
   assert.match(html, /No account or subscription/);
   assert.match(html, /github\.com\/hannadevtools\/reqrescue/);
-  assert.match(html, /https:\/\/app\.reqrescue\.workers\.dev\//);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/app\.reqrescue\.workers\.dev\/"\/?>/,
+  );
   assert.match(html, /class="mobile-menu"/);
   assert.doesNotMatch(html, /application\/ld\+json/);
   assert.match(html, /How is this different from a HAR viewer or sanitizer/);

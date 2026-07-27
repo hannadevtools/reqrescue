@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
@@ -24,6 +25,7 @@ test("runs the synthetic demo and exposes only evidence-based results", async ({
     page.getByRole("heading", { name: /Network failure:/i }),
   ).toBeVisible();
   await expect(page.getByText("medium evidence confidence").first()).toBeVisible();
+  await expect(page.getByText("Recommended next check").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Download clean HAR" })).toBeVisible();
   await expect(page.getByText("proof of a server-side root cause")).toBeVisible();
 });
@@ -49,6 +51,14 @@ test("accepts a HAR file, previews sanitized data, and exports safe files", asyn
   await page.getByRole("button", { name: "Download report" }).click();
   const reportDownload = await reportDownloadPromise;
   expect(reportDownload.suggestedFilename()).toMatch(/-incident\.md$/);
+  const reportPath = await reportDownload.path();
+  expect(reportPath).not.toBeNull();
+  const reportText = await readFile(reportPath!, "utf8");
+  expect(reportText).toContain("Recommended next check");
+  expect(reportText).toContain(
+    "[ReqRescue](https://app.reqrescue.workers.dev)",
+  );
+  expect(reportText).toContain("0 HAR bytes uploaded");
 });
 
 test("keeps adversarial values out of the report and sanitized preview", async ({

@@ -1014,6 +1014,19 @@ function Confidence({ value }: { value: "high" | "medium" | "low" }) {
   );
 }
 
+function BreakableTitle({ value }: { value: string }) {
+  return value.split(/([/.])/).map((part, index) =>
+    part === "/" || part === "." ? (
+      <span key={`${part}-${index}`}>
+        {part}
+        <wbr />
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
+
 function Report({
   analysis,
   onReset,
@@ -1137,7 +1150,9 @@ function Report({
               <span>Incident brief · generated locally</span>
               <i />
             </p>
-            <h1>{analysis.title}</h1>
+            <h1>
+              <BreakableTitle value={analysis.title} />
+            </h1>
             <p>
               ReqRescue found {analysis.failedRequests} failed request
               {analysis.failedRequests === 1 ? "" : "s"}, detected{" "}
@@ -1208,6 +1223,10 @@ function Report({
                         <Confidence value={suspect.confidence} />
                       </div>
                       <p>{suspect.explanation}</p>
+                      <div className="suspect-next">
+                        <span>Recommended next check</span>
+                        <p>{suspect.nextStep}</p>
+                      </div>
                       <ul>
                         {suspect.evidence.map((item) => (
                           <li key={item}>{item}</li>
@@ -1298,13 +1317,17 @@ function Report({
               </header>
               <div className="privacy-score">
                 <div className="score-ring">
-                  <span>{analysis.safetyScore}</span>
+                  <span>
+                    {analysis.safetyScore}
+                    <small>/100</small>
+                  </span>
                 </div>
                 <div>
-                  <b>Raw file risk</b>
+                  <b>Raw share-safety</b>
                   <p>
+                    Higher is safer.{" "}
                     {analysis.findingCount
-                      ? "Sensitive locations were detected in the raw trace."
+                      ? "The raw trace contains sensitive locations."
                       : "No known secret pattern was detected."}
                   </p>
                 </div>
@@ -1364,7 +1387,7 @@ function Report({
               <button onClick={() => copy("report")}>
                 <span>
                   <b>Copy bug report</b>
-                  <small>Markdown · evidence + context</small>
+                  <small>Markdown · evidence + next checks · ReqRescue footer</small>
                 </span>
                 <em>{copied === "report" ? "Copied" : "Copy"}</em>
               </button>
@@ -1438,6 +1461,19 @@ function Report({
           <b>What this report is:</b> deterministic network triage based on the
           captured evidence. <b>What it is not:</b> proof of a server-side root
           cause without the corresponding application logs.
+        </section>
+
+        <section className="report-signature" aria-label="ReqRescue report attribution">
+          <span className="report-signature-mark" aria-hidden="true">
+            R
+          </span>
+          <div>
+            <small>Report generated locally by</small>
+            <b>ReqRescue</b>
+          </div>
+          <a href="https://app.reqrescue.workers.dev">
+            Analyze another HAR ↗
+          </a>
         </section>
       </main>
       <Footer />
