@@ -39,15 +39,20 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /What is a HAR — and how do I get one\?/);
   assert.match(html, /ReqRescue, in plain English/);
   assert.match(html, /Support, QA, developers, and technical founders/);
-  assert.match(html, /Get Pro · \$12/);
-  assert.match(html, /Get lifetime Pro · \$12/);
-  assert.match(html, /One payment\. No ReqRescue account/);
+  assert.match(html, /Support ReqRescue · \$12/);
+  assert.match(html, /Voluntary honorware/);
+  assert.match(html, /No account or subscription/);
   assert.match(html, /github\.com\/hannadevtools\/reqrescue/);
-  assert.match(html, /https:\/\/app\.reqrescue\.workers\.dev\//);
+  assert.match(
+    html,
+    /<link rel="canonical" href="https:\/\/app\.reqrescue\.workers\.dev\/"\/?>/,
+  );
   assert.match(html, /class="mobile-menu"/);
-  assert.match(html, /application\/ld\+json/);
+  assert.doesNotMatch(html, /application\/ld\+json/);
   assert.match(html, /How is this different from a HAR viewer or sanitizer/);
   assert.doesNotMatch(html, /react-loading-skeleton|Your site is taking shape/);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
 });
 
 test("serves crawler discovery files", async () => {
@@ -63,6 +68,8 @@ test("serves crawler discovery files", async () => {
     await sitemap.text(),
     /<loc>https:\/\/app\.reqrescue\.workers\.dev\/<\/loc>/,
   );
+  assert.match(await (await render("/privacy")).text(), /Your HAR stays in your browser/);
+  assert.match(await (await render("/terms")).text(), /Use the evidence\. Verify the conclusion/);
 });
 
 test("returns a controlled response for an unknown route", async () => {

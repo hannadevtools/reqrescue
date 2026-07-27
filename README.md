@@ -36,27 +36,29 @@ HAR parsing, ranking, redaction, and export generation run in the browser:
 - [`app/trace-engine.ts`](app/trace-engine.ts) contains the parser, heuristics,
   redaction, and report generation.
 - [`app/page.tsx`](app/page.tsx) reads files with the browser `File` API and
-  passes their text directly to that engine. It also renders a small preview of
-  the sanitized copy before export.
+  transfers their bytes to a dedicated browser worker. It also renders a small
+  preview of the sanitized copy before export.
 - [`app/api/event/route.ts`](app/api/event/route.ts) accepts only an anonymous
   event name, session identifier, and short acquisition detail.
 
 The hosted build never sends HAR contents, file names, URLs, headers, bodies,
-or generated reports to ReqRescue. Gumroad license activation, when used, sends
-only the license key to Gumroad.
+or generated reports to ReqRescue. It records only an allowlist of pseudonymous
+product events and optional feedback. Gumroad license activation, when used,
+sends only the license key directly to Gumroad.
 
 Automated redaction cannot recognize every product-specific secret. Review a
 sanitized export before sharing it.
 
-## Free and Pro
+## Free core and honorware support
 
 The analyzer, sanitizer, clean HAR export, Markdown incident report, and source
 code are free under the MIT license.
 
-The hosted build offers a voluntary **$12 one-time Pro unlock** for convenience:
+The hosted build offers voluntary **$12 one-time honorware support** with local
+convenience unlocks:
 
 - print or save the complete incident brief as PDF;
-- analyze local HAR files up to 250 MB, subject to device memory;
+- analyze local HAR files up to a protected 75 MB limit, subject to device memory;
 - keep up to 10 incident briefs in this browser's local storage.
 
 There is no ReqRescue account and no subscription. Because the source is open,
@@ -79,9 +81,12 @@ npm test
 npx tsc --project tsconfig.app.json --noEmit
 ```
 
-Tests cover server rendering, deterministic suspect ranking, real HAR parsing,
-and removal of representative tokens, sessions, passwords, email addresses,
-API keys, and IP addresses.
+Tests cover server rendering, local browser-worker uploads, exports,
+accessibility interactions, deterministic suspect ranking, malformed HARs,
+event API boundaries, honorware license states, and adversarial removal of
+credentials, bodies, vendor fields, tokens, sessions, passwords, email
+addresses, API keys, private hosts, and IP addresses. In CI, `npm test`
+installs the pinned Playwright Chromium runtime before running browser tests.
 
 ## Responsible disclosure
 

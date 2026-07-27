@@ -14,31 +14,42 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs && tsx --test tests/trace-engine.test.ts",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "pretest": "node scripts/prepare-e2e.mjs",
+    "test:unit": "tsx --test tests/trace-engine.test.ts tests/license.test.ts tests/event-route.test.ts",
+    "test:render": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit && npm run test:render && npm run test:e2e",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern work --ignore-pattern outputs --ignore-pattern .tools"
   },
   "dependencies": {
-    "next": "16.2.6",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
-    "@tailwindcss/postcss": "4.2.1",
+    "@cloudflare/vite-plugin": "^1.47.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "22.19.19",
-    "@types/react": "19.2.14",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
-    "react-server-dom-webpack": "19.2.6",
-    "tailwindcss": "4.2.1",
-    "tsx": "^4.22.1",
+    "@vitejs/plugin-react": "^6.0.4",
+    "@vitejs/plugin-rsc": "^0.5.30",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0",
+    "react-server-dom-webpack": "^19.2.8",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.1",
     "typescript": "5.9.3",
+    "typescript-eslint": "^8.65.0",
     "vinext": "0.0.50",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vite": "^8.1.5",
+    "wrangler": "^4.114.0"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
   },
   "type": "module"
 }

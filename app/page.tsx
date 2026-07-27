@@ -5,10 +5,15 @@ import {
   analyzeHar,
   buildDemoHar,
   buildSanitizedPreview,
+  FREE_MAX_FILE_BYTES,
   formatBytes,
   formatDuration,
-  parseHar,
+  SUPPORTER_MAX_FILE_BYTES,
 } from "./trace-engine";
+import {
+  isActiveGumroadPurchase,
+  type GumroadLicenseResponse,
+} from "./license";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "landing" | "report";
@@ -20,34 +25,61 @@ type StoredCase = {
   sourceName: string;
   markdown: string;
 };
+type ActiveJob = {
+  cancelled: boolean;
+  worker?: Worker;
+  timer?: number;
+  cancelPromise?: () => void;
+};
+type HarWorkerMessage =
+  | { type: "progress"; message: string }
+  | { type: "complete"; analysis: Analysis }
+  | { type: "error"; message: string };
 
-const FREE_MAX_FILE_BYTES = 80 * 1024 * 1024;
-const PRO_MAX_FILE_BYTES = 250 * 1024 * 1024;
 const GUMROAD_PRODUCT_URL = "https://hannadev.gumroad.com/l/reqrescue-pro";
 const GUMROAD_PRODUCT_ID = "JMi_OpMKayarptn0vFkQtg==";
 const GITHUB_URL = "https://github.com/hannadevtools/reqrescue";
 const PRO_STORAGE_KEY = "reqrescue-pro-unlocked";
 const HISTORY_STORAGE_KEY = "reqrescue-case-history";
 
-function track(event: string, detail?: string) {
+function storageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function track(event: string, detail?: string): Promise<boolean> {
   try {
     const storageKey = "reqrescue-session";
     const session =
-      localStorage.getItem(storageKey) ??
+      storageGet(storageKey) ??
       (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
-    localStorage.setItem(storageKey, session);
-    void fetch("/api/event", {
+    storageSet(storageKey, session);
+    const response = await fetch("/api/event", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         event,
         session,
-        detail: detail?.slice(0, 60),
+        detail: detail?.slice(0, 220),
       }),
       keepalive: true,
     });
+    return response.ok;
   } catch {
     // Analytics must never block the local-first tool.
+    return false;
   }
 }
 
@@ -56,12 +88,26 @@ function acquisitionSource() {
   const source = params.get("utm_source");
   const medium = params.get("utm_medium");
   if (source) {
-    return [source, medium].filter(Boolean).join("/");
+    return [source, medium]
+      .filter(Boolean)
+      .map((value) => value!.replace(/[^a-z0-9_-]/gi, "").slice(0, 40))
+      .filter(Boolean)
+      .join("/");
   }
 
   try {
     const referrer = document.referrer ? new URL(document.referrer).hostname : "";
-    return referrer || "direct";
+    if (!referrer) return "direct";
+    const knownSource = [
+      "reddit.com",
+      "github.com",
+      "news.ycombinator.com",
+      "x.com",
+      "twitter.com",
+      "google.",
+      "bing.com",
+    ].find((candidate) => referrer === candidate || referrer.endsWith(`.${candidate}`));
+    return knownSource ? referrer : "referral";
   } catch {
     return "direct";
   }
@@ -93,7 +139,7 @@ function loadHistory(): StoredCase[] {
   if (typeof window === "undefined") return [];
 
   try {
-    const parsed = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? "[]");
+    const parsed = JSON.parse(storageGet(HISTORY_STORAGE_KEY) ?? "[]");
     return Array.isArray(parsed) ? parsed.slice(0, 10) : [];
   } catch {
     return [];
@@ -128,6 +174,56 @@ function ProModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
+  const modalRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !modalRef.current) return;
+
+      const focusable = [
+        ...modalRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((element) => !element.hasAttribute("hidden"));
+      if (!focusable.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -151,36 +247,56 @@ function ProModal({
   };
 
   const copySavedCase = async (item: StoredCase) => {
-    await navigator.clipboard.writeText(item.markdown);
-    setCopied(item.id);
-    track("pro_history_copy");
+    try {
+      await navigator.clipboard.writeText(item.markdown);
+      setCopied(item.id);
+      void track("pro_history_copy");
+    } catch {
+      setCopied("error");
+    }
     window.setTimeout(() => setCopied(""), 1400);
   };
 
   return (
-    <div className="pro-modal-backdrop" role="presentation">
+    <div
+      className="pro-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
+    >
       <section
+        ref={modalRef}
         className="pro-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="pro-modal-title"
       >
-        <button className="pro-modal-close" onClick={onClose} aria-label="Close">
+        <button
+          ref={closeRef}
+          className="pro-modal-close"
+          onClick={onClose}
+          aria-label="Close"
+        >
           ×
         </button>
         <p className="eyebrow">
-          <span>{unlocked ? "Pro active on this browser" : "One payment · lifetime unlock"}</span>
+          <span>
+            {unlocked ? "Supporter mode active on this browser" : "Voluntary honorware support"}
+          </span>
           <i />
         </p>
         <h2 id="pro-modal-title">
-          {unlocked ? "Your local workflow is unlocked." : "ReqRescue Pro · $12 once"}
+          {unlocked
+            ? "Thank you for supporting the open-source tool."
+            : "Support ReqRescue · $12 honorware"}
         </h2>
 
         {unlocked ? (
           <>
             <ul className="pro-feature-list">
               <li>Print or save complete incident briefs as PDF</li>
-              <li>Analyze local HAR files up to 250 MB</li>
+              <li>Analyze local HAR files up to the protected 75 MB limit</li>
               <li>Keep up to 10 incident briefs on this device</li>
             </ul>
             <div className="case-history">
@@ -199,7 +315,11 @@ function ProModal({
                       </small>
                     </div>
                     <button onClick={() => copySavedCase(item)}>
-                      {copied === item.id ? "Copied" : "Copy report"}
+                      {copied === item.id
+                        ? "Copied"
+                        : copied === "error"
+                          ? "Copy failed"
+                          : "Copy report"}
                     </button>
                   </article>
                 ))
@@ -212,12 +332,12 @@ function ProModal({
           <>
             <p className="pro-modal-copy">
               The analyzer, sanitizer, Markdown report, and clean HAR stay free.
-              Pro adds convenience exports and local workflow features—without
-              an account or subscription.
+              This voluntary honorware purchase supports the hosted build and
+              unlocks convenience features locally—without an account or subscription.
             </p>
             <ul className="pro-feature-list">
               <li>Print-ready PDF incident brief</li>
-              <li>250 MB local file limit</li>
+              <li>Protected 75 MB local file limit</li>
               <li>On-device history for 10 cases</li>
             </ul>
             <a
@@ -225,9 +345,9 @@ function ProModal({
               href={GUMROAD_PRODUCT_URL}
               target="_blank"
               rel="noreferrer"
-              onClick={() => track("pro_checkout_click", "modal")}
+              onClick={() => void track("pro_checkout_click", "modal")}
             >
-              Buy lifetime Pro · $12
+              Support and unlock · $12 once
             </a>
             <form className="license-form" onSubmit={activate}>
               <label htmlFor="license-key">Already bought it? Paste your license key</label>
@@ -251,7 +371,8 @@ function ProModal({
             </form>
             <small className="license-privacy">
               Verification sends only this key to Gumroad. It never sends your
-              HAR, file name, URLs, headers, or bodies.
+              HAR, file name, URLs, headers, or bodies. The local unlock is
+              intentionally lightweight because the core is open source.
             </small>
           </>
         )}
@@ -307,7 +428,7 @@ function Header({
           Open source <span aria-hidden="true">↗</span>
         </a>
         <button className="pro-link" onClick={onOpenPro}>
-          {proUnlocked ? "Pro unlocked" : "Get Pro · $12"}
+          {proUnlocked ? "Supporter mode" : "Support · $12"}
         </button>
       </div>
     </header>
@@ -326,15 +447,19 @@ function LoadingMark() {
 
 function UploadPanel({
   busy,
+  busyMessage,
   error,
   onFile,
   onDemo,
+  onCancel,
   maxFileBytes,
 }: {
   busy: boolean;
+  busyMessage: string;
   error: string;
   onFile: (file: File) => void;
   onDemo: () => void;
+  onCancel: () => void;
   maxFileBytes: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -366,13 +491,20 @@ function UploadPanel({
         type="file"
         accept=".har,.json,application/json"
         hidden
-        onChange={(event) => acceptFile(event.target.files?.[0])}
+        onClick={(event) => {
+          event.currentTarget.value = "";
+        }}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.currentTarget.value = "";
+          acceptFile(file);
+        }}
       />
       <div className="drop-symbol" aria-hidden="true">
         <span>HAR</span>
         <i />
       </div>
-      <h2>{busy ? "Reading the trace…" : "Drop a HAR. Get the case."}</h2>
+      <h2>{busy ? busyMessage || "Reading the trace…" : "Drop a HAR. Get the case."}</h2>
       <p>
         Nothing is uploaded. Your browser performs the entire analysis and
         redaction locally.
@@ -394,9 +526,15 @@ function UploadPanel({
             "Choose HAR file"
           )}
         </button>
+        {busy && (
+          <button className="button button-quiet" onClick={onCancel}>
+            Cancel local analysis
+          </button>
+        )}
       </div>
       <p className="file-note">
-        Chrome, Firefox, Edge, Safari · up to {Math.round(maxFileBytes / 1024 / 1024)} MB
+        Chrome, Firefox, Edge, Safari · protected local limit{" "}
+        {Math.round(maxFileBytes / 1024 / 1024)} MB
       </p>
       <details className="har-help">
         <summary>What is a HAR — and how do I get one?</summary>
@@ -430,15 +568,19 @@ function UploadPanel({
 
 function Hero({
   busy,
+  busyMessage,
   error,
   onFile,
   onDemo,
+  onCancel,
   maxFileBytes,
 }: {
   busy: boolean;
+  busyMessage: string;
   error: string;
   onFile: (file: File) => void;
   onDemo: () => void;
+  onCancel: () => void;
   maxFileBytes: number;
 }) {
   return (
@@ -476,9 +618,11 @@ function Hero({
         </div>
         <UploadPanel
           busy={busy}
+          busyMessage={busyMessage}
           error={error}
           onFile={onFile}
           onDemo={onDemo}
+          onCancel={onCancel}
           maxFileBytes={maxFileBytes}
         />
       </section>
@@ -664,8 +808,9 @@ function Privacy() {
       <div className="privacy-copy">
         <p>
           Parsing, triage, and file generation run in this tab. We record only
-          anonymous product events such as “demo analyzed” or “report exported”—
-          never file names, URLs, headers, bodies, or HAR contents.
+          pseudonymous product events such as “demo analyzed” or “report exported,”
+          using a random identifier stored in this browser—never file names, URLs,
+          headers, bodies, or HAR contents.
         </p>
         <div className="privacy-flow" aria-label="Data flow">
           <span>Your HAR</span>
@@ -689,7 +834,7 @@ function Faq() {
     {
       question: "What sensitive data does it remove?",
       answer:
-        "ReqRescue strips cookies, authorization headers, API keys, access and refresh tokens, passwords, emails, IP addresses, private hosts, and sensitive request or response body fields. You should still review any exported evidence before sharing it.",
+        "ReqRescue strips request and response bodies, cookies, authorization headers, API keys, access and refresh tokens, passwords, emails, IP addresses, private hosts, URL credentials and likely identifiers in paths. It also drops unknown vendor fields. Automated redaction cannot guarantee recognition of every product-specific secret, so review every export before sharing it.",
     },
     {
       question: "How is this different from a HAR viewer or sanitizer?",
@@ -752,40 +897,43 @@ function Roadmap({
     <section className="section roadmap" id="roadmap">
       <div className="roadmap-copy">
         <p className="eyebrow">
-          <span>ReqRescue Pro · one-time unlock</span>
+          <span>Voluntary honorware · one-time support</span>
           <i />
         </p>
-        <h2>Keep the rescue free. Pay once for the workflow.</h2>
+        <h2>Keep the rescue free. Support it if it saves you time.</h2>
         <p>
           Analysis, redaction, clean HAR, and Markdown export stay free and open
-          source. Pro is a lifetime convenience unlock for PDF handoff, larger
-          local files, and case history on this device.
+          source. The $12 honorware purchase is voluntary support for the hosted
+          build and unlocks local convenience features.
         </p>
         <div className="roadmap-actions">
           <button className="button button-primary" onClick={onOpenPro}>
-            {proUnlocked ? "View your Pro history" : "Get lifetime Pro · $12"}
+            {proUnlocked ? "View Supporter history" : "Support ReqRescue · $12"}
           </button>
           <button className="button button-outline" onClick={onDemo}>
             Open the demo case
           </button>
         </div>
         <small className="pilot-fineprint">
-          One payment. No ReqRescue account. 30-day money-back guarantee.
+          Voluntary honorware. No account or subscription. 30-day money-back guarantee.
         </small>
       </div>
       <div className="pilot-offer">
         <header>
-          <span>Lifetime price</span>
+          <span>Suggested support</span>
           <strong>$12<small> once</small></strong>
         </header>
         <p>For people who use HARs often enough to want a faster handoff.</p>
         <ul>
           <li>Print or save the full incident brief as PDF</li>
-          <li>Analyze files up to 250 MB, locally</li>
+          <li>Analyze files up to the protected 75 MB limit</li>
           <li>Save 10 case reports on this device</li>
-          <li>Future Pro convenience exports included</li>
+          <li>Future Supporter convenience exports included</li>
         </ul>
-        <small>The free core is not crippled, timed, or account-gated.</small>
+        <small>
+          The free core is not crippled, timed, or account-gated. The local
+          honorware unlock is intentionally lightweight.
+        </small>
       </div>
     </section>
   );
@@ -793,82 +941,36 @@ function Roadmap({
 
 function Landing({
   busy,
+  busyMessage,
   error,
   onFile,
   onDemo,
+  onCancel,
   maxFileBytes,
   proUnlocked,
   onOpenPro,
 }: {
   busy: boolean;
+  busyMessage: string;
   error: string;
   onFile: (file: File) => void;
   onDemo: () => void;
+  onCancel: () => void;
   maxFileBytes: number;
   proUnlocked: boolean;
   onOpenPro: () => void;
 }) {
-  const structuredData = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "SoftwareApplication",
-        name: "ReqRescue",
-        applicationCategory: "DeveloperApplication",
-        operatingSystem: "Any modern web browser",
-        url: "https://app.reqrescue.workers.dev/",
-        description:
-          "A free local-first HAR analyzer and sanitizer that creates ranked incident briefs, clean evidence files, and developer-ready bug reports.",
-        offers: {
-          "@type": "Offer",
-          price: "0",
-          priceCurrency: "USD",
-        },
-        featureList: [
-          "Local HAR analysis",
-          "Sensitive data redaction",
-          "Evidence-backed failure ranking",
-          "Sanitized HAR export",
-          "Markdown incident report",
-        ],
-      },
-      {
-        "@type": "FAQPage",
-        mainEntity: [
-          {
-            "@type": "Question",
-            name: "Does ReqRescue upload my HAR file?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "No. Parsing, ranking, redaction, and exports run locally in the browser.",
-            },
-          },
-          {
-            "@type": "Question",
-            name: "How is ReqRescue different from a HAR viewer or sanitizer?",
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: "ReqRescue sanitizes the trace, ranks evidence-backed suspects, and generates a developer-ready incident report.",
-            },
-          },
-        ],
-      },
-    ],
-  };
-
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
-      />
       <Header report={false} proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
       <main>
         <Hero
           busy={busy}
+          busyMessage={busyMessage}
           error={error}
           onFile={onFile}
           onDemo={onDemo}
+          onCancel={onCancel}
           maxFileBytes={maxFileBytes}
         />
         <PlainEnglish />
@@ -905,7 +1007,24 @@ function Metric({
 }
 
 function Confidence({ value }: { value: "high" | "medium" | "low" }) {
-  return <span className={`confidence confidence-${value}`}>{value} confidence</span>;
+  return (
+    <span className={`confidence confidence-${value}`}>
+      {value} evidence confidence
+    </span>
+  );
+}
+
+function BreakableTitle({ value }: { value: string }) {
+  return value.split(/([/.])/).map((part, index) =>
+    part === "/" || part === "." ? (
+      <span key={`${part}-${index}`}>
+        {part}
+        <wbr />
+      </span>
+    ) : (
+      part
+    ),
+  );
 }
 
 function Report({
@@ -926,7 +1045,10 @@ function Report({
   const [feedback, setFeedback] = useState<"yes" | "no" | "">("");
   const [note, setNote] = useState("");
   const [noteSent, setNoteSent] = useState(false);
+  const [noteSending, setNoteSending] = useState(false);
+  const [noteError, setNoteError] = useState("");
   const [caseSaved, setCaseSaved] = useState(false);
+  const [actionError, setActionError] = useState("");
   const preview = useMemo(() => buildSanitizedPreview(analysis), [analysis]);
 
   const rows = useMemo(() => {
@@ -940,12 +1062,17 @@ function Report({
   }, [analysis.requests, filter]);
 
   const copy = async (kind: "report" | "ai") => {
-    await navigator.clipboard.writeText(
-      kind === "report" ? analysis.markdown : analysis.aiPrompt,
-    );
-    setCopied(kind);
-    track(kind === "report" ? "copy_report" : "copy_ai_prompt");
-    window.setTimeout(() => setCopied(""), 1600);
+    setActionError("");
+    try {
+      await navigator.clipboard.writeText(
+        kind === "report" ? analysis.markdown : analysis.aiPrompt,
+      );
+      setCopied(kind);
+      void track(kind === "report" ? "copy_report" : "copy_ai_prompt");
+      window.setTimeout(() => setCopied(""), 1600);
+    } catch {
+      setActionError("Clipboard access was blocked. Download the report instead.");
+    }
   };
 
   const exportSanitized = () => {
@@ -954,7 +1081,7 @@ function Report({
       JSON.stringify(analysis.sanitized, null, 2),
       "application/json",
     );
-    track("export_sanitized_har");
+    void track("export_sanitized_har");
   };
 
   const exportReport = () => {
@@ -963,19 +1090,26 @@ function Report({
       analysis.markdown,
       "text/markdown",
     );
-    track("export_markdown");
+    void track("export_markdown");
   };
 
   const answerFeedback = (answer: "yes" | "no") => {
     setFeedback(answer);
-    track("report_helpful", answer);
+    void track("report_helpful", answer);
   };
 
-  const sendNote = () => {
+  const sendNote = async () => {
     if (!note.trim()) return;
-    track("feedback_note", note.trim());
-    setNoteSent(true);
-    setNote("");
+    setNoteSending(true);
+    setNoteError("");
+    const sent = await track("feedback_note", note.trim());
+    setNoteSending(false);
+    if (sent) {
+      setNoteSent(true);
+      setNote("");
+    } else {
+      setNoteError("The note could not be sent. Your report and HAR were not affected.");
+    }
   };
 
   const printReport = () => {
@@ -983,7 +1117,7 @@ function Report({
       onOpenPro();
       return;
     }
-    track("pro_pdf_print");
+    void track("pro_pdf_print");
     window.print();
   };
 
@@ -992,8 +1126,15 @@ function Report({
       onOpenPro();
       return;
     }
-    onSaveCase(analysis);
-    setCaseSaved(true);
+    setActionError("");
+    try {
+      onSaveCase(analysis);
+      setCaseSaved(true);
+    } catch (reason) {
+      setActionError(
+        reason instanceof Error ? reason.message : "This case could not be saved locally.",
+      );
+    }
   };
 
   return (
@@ -1009,12 +1150,15 @@ function Report({
               <span>Incident brief · generated locally</span>
               <i />
             </p>
-            <h1>{analysis.title}</h1>
+            <h1>
+              <BreakableTitle value={analysis.title} />
+            </h1>
             <p>
               ReqRescue found {analysis.failedRequests} failed request
-              {analysis.failedRequests === 1 ? "" : "s"} and removed{" "}
-              {analysis.findingCount} sensitive value
-              {analysis.findingCount === 1 ? "" : "s"} from the shareable copy.
+              {analysis.failedRequests === 1 ? "" : "s"}, detected{" "}
+              {analysis.findingCount} sensitive exposure
+              {analysis.findingCount === 1 ? "" : "s"}, and rebuilt every
+              shareable output from sanitized evidence.
             </p>
           </div>
           <div className="report-actions">
@@ -1025,12 +1169,21 @@ function Report({
               Download report
             </button>
             <button className="button button-outline" onClick={printReport}>
-              {proUnlocked ? "Print / save PDF" : "PDF · Pro"}
+              {proUnlocked ? "Print / save PDF" : "PDF · Supporter"}
             </button>
             <button className="button button-outline" onClick={saveCase}>
-              {caseSaved ? "Saved locally" : proUnlocked ? "Save case" : "History · Pro"}
+              {caseSaved
+                ? "Saved locally"
+                : proUnlocked
+                  ? "Save case"
+                  : "History · Supporter"}
             </button>
           </div>
+          {actionError && (
+            <p className="action-error" role="alert">
+              {actionError}
+            </p>
+          )}
         </section>
 
         <section className="metrics-bar" aria-label="Trace summary">
@@ -1070,6 +1223,10 @@ function Report({
                         <Confidence value={suspect.confidence} />
                       </div>
                       <p>{suspect.explanation}</p>
+                      <div className="suspect-next">
+                        <span>Recommended next check</span>
+                        <p>{suspect.nextStep}</p>
+                      </div>
                       <ul>
                         {suspect.evidence.map((item) => (
                           <li key={item}>{item}</li>
@@ -1160,13 +1317,17 @@ function Report({
               </header>
               <div className="privacy-score">
                 <div className="score-ring">
-                  <span>{analysis.safetyScore}</span>
+                  <span>
+                    {analysis.safetyScore}
+                    <small>/100</small>
+                  </span>
                 </div>
                 <div>
-                  <b>Raw file risk</b>
+                  <b>Raw share-safety</b>
                   <p>
+                    Higher is safer.{" "}
                     {analysis.findingCount
-                      ? "Use the sanitized export, then review it once."
+                      ? "The raw trace contains sensitive locations."
                       : "No known secret pattern was detected."}
                   </p>
                 </div>
@@ -1189,8 +1350,9 @@ function Report({
                 )}
               </ul>
               <p className="privacy-warning">
-                Automated redaction cannot recognize every product-specific
-                secret. Always review before sending.
+                Bodies, page titles, URL credentials, opaque path identifiers,
+                private hosts, and unknown extension fields are stripped by
+                default. Always review before sending.
               </p>
             </section>
 
@@ -1205,8 +1367,9 @@ function Report({
               <div>
                 <p>
                   This is a small preview of the cleaned copy generated in your
-                  browser. Search for <code>[REDACTED]</code> and review any
-                  product-specific values before sharing the full export.
+                  browser. Request and response bodies are removed rather than
+                  guessed. Search for <code>[REDACTED]</code> and review any
+                  remaining product-specific values before sharing the full export.
                 </p>
                 <pre>
                   <code>{preview}</code>
@@ -1224,7 +1387,7 @@ function Report({
               <button onClick={() => copy("report")}>
                 <span>
                   <b>Copy bug report</b>
-                  <small>Markdown · evidence + context</small>
+                  <small>Markdown · evidence + next checks · ReqRescue footer</small>
                 </span>
                 <em>{copied === "report" ? "Copied" : "Copy"}</em>
               </button>
@@ -1268,16 +1431,17 @@ function Report({
                     onChange={(event) => setNote(event.target.value)}
                     placeholder="One sentence would help us improve…"
                   />
-                  <button disabled={!note.trim()} onClick={sendNote}>
-                    Send
+                  <button disabled={!note.trim() || noteSending} onClick={sendNote}>
+                    {noteSending ? "Sending…" : "Send"}
                   </button>
+                  {noteError && <small role="alert">{noteError}</small>}
                 </div>
               )}
               {noteSent && <small>Received. Thank you.</small>}
             </section>
 
             <section className="report-card pilot-card">
-              <span>Lifetime Pro · $12 once</span>
+              <span>Voluntary Supporter honorware · $12 once</span>
               <h2>Save the brief, not another subscription.</h2>
               <p>
                 Add PDF handoff, larger local files, and on-device history. The
@@ -1287,7 +1451,7 @@ function Report({
                 className="button button-primary"
                 onClick={onOpenPro}
               >
-                {proUnlocked ? "Open Pro history" : "Unlock lifetime Pro"}
+                {proUnlocked ? "Open Supporter history" : "Support and unlock"}
               </button>
             </section>
           </aside>
@@ -1297,6 +1461,19 @@ function Report({
           <b>What this report is:</b> deterministic network triage based on the
           captured evidence. <b>What it is not:</b> proof of a server-side root
           cause without the corresponding application logs.
+        </section>
+
+        <section className="report-signature" aria-label="ReqRescue report attribution">
+          <span className="report-signature-mark" aria-hidden="true">
+            R
+          </span>
+          <div>
+            <small>Report generated locally by</small>
+            <b>ReqRescue</b>
+          </div>
+          <a href="https://app.reqrescue.workers.dev">
+            Analyze another HAR ↗
+          </a>
         </section>
       </main>
       <Footer />
@@ -1309,7 +1486,13 @@ function Footer() {
     <footer className="site-footer">
       <Logo />
       <p>Local-first evidence triage for web incidents.</p>
-      <span>Built for useful bug reports, not data collection.</span>
+      <nav aria-label="Legal and project links">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+          Source
+        </a>
+      </nav>
     </footer>
   );
 }
@@ -1318,72 +1501,145 @@ export default function Home() {
   const [view, setView] = useState<View>("landing");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyMessage, setBusyMessage] = useState("");
   const [error, setError] = useState("");
   const [proUnlocked, setProUnlocked] = useState(false);
   const [proOpen, setProOpen] = useState(false);
   const [history, setHistory] = useState<StoredCase[]>([]);
+  const activeJobRef = useRef<ActiveJob | null>(null);
 
   useEffect(() => {
-    track("page_view", acquisitionSource());
+    document.documentElement.dataset.reqrescueReady = "true";
+    void track("page_view", acquisitionSource());
     const initialization = window.setTimeout(() => {
-      setProUnlocked(localStorage.getItem(PRO_STORAGE_KEY) === "true");
+      setProUnlocked(storageGet(PRO_STORAGE_KEY) === "true");
       setHistory(loadHistory());
     }, 0);
-    return () => window.clearTimeout(initialization);
+    return () => {
+      delete document.documentElement.dataset.reqrescueReady;
+      window.clearTimeout(initialization);
+      const job = activeJobRef.current;
+      if (job?.timer) window.clearTimeout(job.timer);
+      job?.worker?.terminate();
+    };
   }, []);
 
   const finish = useCallback((next: Analysis, source: "file" | "demo") => {
     setAnalysis(next);
     setView("report");
     setBusy(false);
+    setBusyMessage("");
     setError("");
     window.scrollTo({ top: 0, behavior: "instant" });
-    track("analysis_complete", source);
+    void track("analysis_complete", source);
   }, []);
 
   const handleFile = useCallback(
     async (file: File) => {
       setError("");
-      const maxBytes = proUnlocked ? PRO_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES;
+      const maxBytes = proUnlocked ? SUPPORTER_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES;
       if (file.size > maxBytes) {
         setError(
           proUnlocked
-            ? "This browser accepts Pro files up to 250 MB."
-            : "The free build accepts up to 80 MB. Lifetime Pro raises the local limit to 250 MB.",
+            ? "The protected Supporter limit is 75 MB. Larger files need a future streaming parser."
+            : "The protected free limit is 25 MB. Honorware Supporter mode raises it to 75 MB.",
         );
         return;
       }
+      const job: ActiveJob = { cancelled: false };
+      activeJobRef.current?.worker?.terminate();
+      activeJobRef.current = job;
       setBusy(true);
+      setBusyMessage("Reading the HAR locally…");
       try {
-        const text = await file.text();
-        const har = parseHar(text);
-        const next = analyzeHar(har, file.name);
+        const buffer = await file.arrayBuffer();
+        if (job.cancelled) return;
+
+        const worker = new Worker(new URL("./har.worker.ts", import.meta.url), {
+          type: "module",
+        });
+        job.worker = worker;
+        const next = await new Promise<Analysis>((resolve, reject) => {
+          job.cancelPromise = () => reject(new Error("Local analysis canceled."));
+          worker.onmessage = (event: MessageEvent<HarWorkerMessage>) => {
+            if (job.cancelled) return;
+            if (event.data.type === "progress") {
+              setBusyMessage(event.data.message);
+            } else if (event.data.type === "complete") {
+              resolve(event.data.analysis);
+            } else {
+              reject(new Error(event.data.message));
+            }
+          };
+          worker.onerror = () => {
+            reject(new Error("The local analysis worker stopped unexpectedly."));
+          };
+          worker.postMessage(
+            {
+              type: "analyze",
+              buffer,
+              sourceName: file.name,
+            },
+            [buffer],
+          );
+        });
+        worker.terminate();
+        if (job.cancelled) return;
+        activeJobRef.current = null;
         finish(next, "file");
       } catch (reason) {
+        job.worker?.terminate();
+        if (job.cancelled) return;
+        activeJobRef.current = null;
         setBusy(false);
+        setBusyMessage("");
         setError(reason instanceof Error ? reason.message : "Unknown parsing error.");
-        track("analysis_error");
+        void track("analysis_error");
       }
     },
     [finish, proUnlocked],
   );
 
   const handleDemo = useCallback(() => {
+    const job: ActiveJob = { cancelled: false };
+    activeJobRef.current?.worker?.terminate();
+    activeJobRef.current = job;
     setBusy(true);
+    setBusyMessage("Building the synthetic local demo…");
     setError("");
-    window.setTimeout(() => {
+    job.timer = window.setTimeout(() => {
+      if (job.cancelled) return;
       try {
+        activeJobRef.current = null;
         finish(analyzeHar(buildDemoHar(), "broken-checkout-demo.har"), "demo");
       } catch (reason) {
+        activeJobRef.current = null;
         setBusy(false);
+        setBusyMessage("");
         setError(reason instanceof Error ? reason.message : "Demo failed to load.");
       }
     }, 380);
   }, [finish]);
 
+  const cancelAnalysis = useCallback(() => {
+    const job = activeJobRef.current;
+    if (!job) return;
+    job.cancelled = true;
+    if (job.timer) window.clearTimeout(job.timer);
+    job.worker?.terminate();
+    job.cancelPromise?.();
+    activeJobRef.current = null;
+    setBusy(false);
+    setBusyMessage("");
+    setError("Local analysis canceled. No trace data left this browser.");
+    void track("analysis_cancelled");
+  }, []);
+
   const reset = () => {
     setView("landing");
     setAnalysis(null);
+    setBusy(false);
+    setBusyMessage("");
     setError("");
     window.scrollTo({ top: 0, behavior: "instant" });
   };
@@ -1402,34 +1658,19 @@ export default function Home() {
     });
 
     if (!response.ok) {
-      track("pro_activation_error", "invalid");
+      void track("pro_activation_error", "invalid");
       throw new Error("That license key was not accepted. Copy it from your Gumroad receipt.");
     }
 
-    const result = (await response.json()) as {
-      success?: boolean;
-      purchase?: {
-        product_id?: string;
-        refunded?: boolean;
-        disputed?: boolean;
-        chargebacked?: boolean;
-      };
-    };
-    const purchase = result.purchase;
-    if (
-      !result.success ||
-      purchase?.product_id !== GUMROAD_PRODUCT_ID ||
-      purchase.refunded ||
-      purchase.disputed ||
-      purchase.chargebacked
-    ) {
-      track("pro_activation_error", "inactive");
+    const result = (await response.json()) as GumroadLicenseResponse;
+    if (!isActiveGumroadPurchase(result, GUMROAD_PRODUCT_ID)) {
+      void track("pro_activation_error", "inactive");
       throw new Error("This purchase is not active. Check the key or the Gumroad receipt.");
     }
 
-    localStorage.setItem(PRO_STORAGE_KEY, "true");
+    storageSet(PRO_STORAGE_KEY, "true");
     setProUnlocked(true);
-    track("pro_activation_success");
+    void track("pro_activation_success");
   };
 
   const saveCaseToHistory = (item: Analysis) => {
@@ -1441,9 +1682,11 @@ export default function Home() {
       markdown: item.markdown,
     };
     const next = [stored, ...loadHistory()].slice(0, 10);
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(next));
+    if (!storageSet(HISTORY_STORAGE_KEY, JSON.stringify(next))) {
+      throw new Error("This browser could not save the case locally.");
+    }
     setHistory(next);
-    track("pro_case_saved");
+    void track("pro_case_saved");
   };
 
   return (
@@ -1459,10 +1702,12 @@ export default function Home() {
       ) : (
         <Landing
           busy={busy}
+          busyMessage={busyMessage}
           error={error}
           onFile={handleFile}
           onDemo={handleDemo}
-          maxFileBytes={proUnlocked ? PRO_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES}
+          onCancel={cancelAnalysis}
+          maxFileBytes={proUnlocked ? SUPPORTER_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES}
           proUnlocked={proUnlocked}
           onOpenPro={() => setProOpen(true)}
         />
