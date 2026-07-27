@@ -85,7 +85,8 @@ Tests cover server rendering, local browser-worker uploads, exports,
 accessibility interactions, deterministic suspect ranking, malformed HARs,
 event API boundaries, honorware license states, and adversarial removal of
 credentials, bodies, vendor fields, tokens, sessions, passwords, email
-addresses, API keys, private hosts, and IP addresses.
+addresses, API keys, private hosts, and IP addresses. In CI, `npm test`
+installs the pinned Playwright Chromium runtime before running browser tests.
 
 ## Responsible disclosure
 
