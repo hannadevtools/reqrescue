@@ -5,6 +5,16 @@ const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
+  <url>
+    <loc>https://app.reqrescue.workers.dev/privacy</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
+  <url>
+    <loc>https://app.reqrescue.workers.dev/terms</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
 </urlset>
 `;
 
