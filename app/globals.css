@@ -1405,6 +1405,32 @@ button {
   max-width: 800px;
 }
 
+.suspect-next {
+  background: #f5ffcd;
+  border-left: 3px solid var(--acid-dark);
+  margin: 0 0 15px;
+  max-width: 800px;
+  padding: 11px 13px 12px;
+}
+
+.suspect-next span {
+  color: var(--safe);
+  display: block;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+.suspect-next p {
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
 .suspect ul {
   display: flex;
   flex-wrap: wrap;
@@ -1566,11 +1592,19 @@ button {
 }
 
 .score-ring span {
+  align-items: baseline;
+  display: flex;
   font-family: var(--mono);
   font-size: 17px;
   font-weight: 800;
   position: relative;
   z-index: 1;
+}
+
+.score-ring small {
+  color: var(--muted);
+  font-size: 7px;
+  margin-left: 1px;
 }
 
 .privacy-score b {
@@ -1877,6 +1911,60 @@ button {
 
 .report-disclaimer b {
   color: var(--ink);
+}
+
+.report-signature {
+  align-items: center;
+  background: var(--night);
+  color: var(--white);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 38px 1fr auto;
+  margin-top: 12px;
+  padding: 16px 20px;
+}
+
+.report-signature-mark {
+  align-items: center;
+  background: var(--acid);
+  color: var(--ink);
+  display: flex;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.report-signature div {
+  display: grid;
+  gap: 2px;
+}
+
+.report-signature small {
+  color: #aeb4a9;
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.report-signature b {
+  font-size: 14px;
+}
+
+.report-signature a {
+  color: var(--acid);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.report-signature a:hover {
+  color: var(--white);
 }
 
 .pro-modal-backdrop {
@@ -2334,6 +2422,15 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .report-signature {
+    align-items: start;
+    grid-template-columns: 34px 1fr;
+  }
+
+  .report-signature a {
+    grid-column: 1 / -1;
+  }
+
   .feedback-card {
     grid-column: auto;
   }
@@ -2422,7 +2519,8 @@ button {
 
   .report-card,
   .suspect,
-  .report-disclaimer {
+  .report-disclaimer,
+  .report-signature {
     break-inside: avoid;
   }
 

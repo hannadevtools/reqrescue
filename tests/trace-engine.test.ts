@@ -41,7 +41,14 @@ test("ranks the repeated auth failure above an unrelated telemetry failure", () 
   assert.equal(analysis.failedRequests, 4);
   assert.match(analysis.suspects[0].title, /401 failure.*checkout/i);
   assert.equal(analysis.suspects[0].confidence, "medium");
+  assert.match(analysis.suspects[0].nextStep, /fresh session|authentication service/i);
   assert.match(analysis.markdown, /Ranked suspects/);
+  assert.match(analysis.markdown, /Recommended next check/);
+  assert.match(
+    analysis.markdown,
+    /\[ReqRescue\]\(https:\/\/app\.reqrescue\.workers\.dev\)/,
+  );
+  assert.match(analysis.markdown, /0 HAR bytes uploaded/);
 });
 
 test("removes the known secrets and PII in the demo HAR", () => {
@@ -79,6 +86,7 @@ test("parses a real HAR fixture and identifies the 403", async () => {
   assert.equal(analysis.failedRequests, 1);
   assert.match(analysis.title, /403/);
   assert.match(analysis.suspects[0].explanation, /permission|CSRF|security rule/i);
+  assert.match(analysis.suspects[0].nextStep, /permission|CSRF|WAF|policy/i);
 });
 
 test("strictly allowlists exported fields and strips adversarial secrets everywhere", () => {
