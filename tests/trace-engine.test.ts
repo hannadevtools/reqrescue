@@ -207,7 +207,7 @@ test("rejects traces above the request-count safety bound", () => {
   const entries = Array.from({ length: 50_001 }, () => ({}));
   assert.throws(
     () => parseHar(JSON.stringify({ log: { entries } })),
-    /safe limit is 50\s?001|safe limit is 50\s?000/,
+    /safe limit is 50(?:[,\s\u00a0\u202f]?000)/,
   );
 });
 
