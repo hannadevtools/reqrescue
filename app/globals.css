@@ -1038,6 +1038,84 @@ button {
   justify-self: end;
 }
 
+.site-footer nav {
+  display: flex;
+  gap: 22px;
+  justify-self: end;
+}
+
+.site-footer nav a {
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.site-footer nav a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.legal-shell {
+  margin: 0 auto;
+  max-width: 920px;
+  min-height: 100vh;
+  padding: 52px 28px 100px;
+}
+
+.legal-shell > nav {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 70px;
+  padding-bottom: 22px;
+}
+
+.legal-shell > nav a {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.legal-shell article {
+  max-width: 740px;
+}
+
+.legal-shell h1 {
+  font-size: clamp(44px, 8vw, 82px);
+  letter-spacing: -0.055em;
+  line-height: 0.95;
+  margin: 28px 0;
+}
+
+.legal-shell h2 {
+  border-top: 1px solid var(--line);
+  font-size: 23px;
+  margin: 46px 0 12px;
+  padding-top: 24px;
+}
+
+.legal-shell article > p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.legal-shell .legal-lead {
+  color: var(--ink);
+  font-size: 21px;
+}
+
+.legal-shell .legal-updated {
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-top: 60px;
+}
+
 .plain-english {
   background: var(--white);
 }
@@ -2191,23 +2269,49 @@ button {
     justify-self: start;
   }
 
+  .site-footer nav {
+    justify-self: start;
+  }
+
+  .legal-shell {
+    padding: 30px 20px 70px;
+  }
+
+  .legal-shell > nav {
+    margin-bottom: 50px;
+  }
+
   .report-shell {
     padding: 36px 15px 75px;
   }
 
   .report-heading {
     gap: 28px;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .report-heading > div {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .report-heading h1 {
+    overflow-wrap: anywhere;
   }
 
   .report-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     max-width: none;
+    min-width: 0;
     width: 100%;
   }
 
   .report-actions .button {
+    min-width: 0;
     padding: 0 13px;
+    white-space: normal;
   }
 
   .metrics-bar {
