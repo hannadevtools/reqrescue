@@ -30,13 +30,14 @@ test("server-renders the ReqRescue product shell", async () => {
   const html = await response.text();
   assert.match(
     html,
-    /<title>ReqRescue — Free local HAR analyzer, sanitizer &amp; incident brief<\/title>/i,
+    /<title>ReqRescue — Turn browser failures into safe bug reports<\/title>/i,
   );
-  assert.match(html, /Stop sending raw traces/);
-  assert.match(html, /Drop a HAR\. Get the case\./);
+  assert.match(html, /A website broke/);
+  assert.match(html, /Send (?:<em>)?evidence, not guesswork/);
+  assert.match(html, /Drop the browser recording \(HAR\)/);
   assert.match(html, /Nothing is uploaded/);
   assert.match(html, /Run a 15-second demo — no HAR needed/);
-  assert.match(html, /What is a HAR — and how do I get one\?/);
+  assert.match(html, /Need a HAR\? Export one in 3 steps/);
   assert.match(html, /ReqRescue, in plain English/);
   assert.match(html, /Support, QA, developers, and technical founders/);
   assert.match(html, /Support ReqRescue · \$12/);

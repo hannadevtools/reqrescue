@@ -39,8 +39,9 @@ test("ranks the repeated auth failure above an unrelated telemetry failure", () 
 
   assert.equal(analysis.totalRequests, 7);
   assert.equal(analysis.failedRequests, 4);
-  assert.match(analysis.suspects[0].title, /401 failure.*checkout/i);
-  assert.equal(analysis.suspects[0].confidence, "medium");
+  assert.match(analysis.suspects[0].title, /authentication chain failed/i);
+  assert.equal(analysis.suspects[0].confidence, "high");
+  assert.match(analysis.suspects[0].evidence.join(" "), /checkout.*auth\/refresh/i);
   assert.match(analysis.suspects[0].nextStep, /fresh session|authentication service/i);
   assert.match(analysis.markdown, /Ranked suspects/);
   assert.match(analysis.markdown, /Recommended next check/);

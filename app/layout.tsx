@@ -13,7 +13,7 @@ const structuredData = {
   browserRequirements: "Requires a modern browser with Web Worker support",
   isAccessibleForFree: true,
   description:
-    "A local-first HAR analyzer and sanitizer that ranks likely failure causes, removes sensitive values, and exports a clean HAR plus a developer-ready incident report.",
+    "A browser-local tool that turns a failed web session into ranked evidence, removes common secrets, and creates a clean HAR plus a developer-ready bug report.",
   featureList: [
     "Local browser-only HAR analysis",
     "Cookie, token, email, IP address, and request-body redaction",
@@ -36,9 +36,9 @@ const structuredDataJson = JSON.stringify(structuredData).replace(
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "ReqRescue — Free local HAR analyzer, sanitizer & incident brief",
+  title: "ReqRescue — Turn browser failures into safe bug reports",
   description:
-    "Analyze and sanitize HAR files locally. Rank likely failures, remove tokens and cookies, export a clean HAR, and create a developer-ready bug report. Free, no upload, no account.",
+    "A website broke? Drop its browser network recording (HAR), find likely failure points, remove common secrets, and create a ready-to-send bug report. Free and local.",
   applicationName: "ReqRescue",
   keywords: [
     "HAR analyzer",
@@ -73,9 +73,9 @@ export const metadata: Metadata = {
     shortcut: "/favicon.svg",
   },
   openGraph: {
-    title: "ReqRescue — Stop sending raw traces",
+    title: "ReqRescue — Turn browser failures into safe bug reports",
     description:
-      "Analyze and sanitize a browser HAR locally, then turn it into ranked evidence and a developer-ready incident report.",
+      "Find likely failure points, remove common secrets, and create a ready-to-send bug report. The browser recording never leaves your tab.",
     url: siteUrl,
     siteName: "ReqRescue",
     type: "website",
@@ -83,9 +83,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "ReqRescue — Stop sending raw traces",
+    title: "ReqRescue — Turn browser failures into safe bug reports",
     description:
-      "Local-first HAR triage, secret scrubbing, and evidence-backed bug reports.",
+      "Turn a failed web session into clean evidence and a bug report your engineer can use.",
     images: ["/social-card.png"],
   },
 };

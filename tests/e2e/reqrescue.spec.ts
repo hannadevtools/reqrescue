@@ -19,13 +19,26 @@ test("runs the synthetic demo and exposes only evidence-based results", async ({
   page,
 }) => {
   await openApp(page);
+  await expect(page.getByRole("link", { name: "How it works" })).toHaveAttribute(
+    "href",
+    "/#how-it-works",
+  );
   await page.getByRole("button", { name: /Run a 15-second demo/i }).click();
 
   await expect(
     page.getByRole("heading", { name: /Network failure:/i }),
   ).toBeVisible();
-  await expect(page.getByText("medium evidence confidence").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "How it works" })).toHaveAttribute(
+    "href",
+    "/#how-it-works",
+  );
+  await expect(page.getByText("high evidence confidence").first()).toBeVisible();
   await expect(page.getByText("Recommended next check").first()).toBeVisible();
+  await page.getByRole("button", { name: "slow ≥ 1 s" }).click();
+  await expect(page.getByText("184 ms")).toHaveCount(0);
+  await expect(
+    page.getByText(/Showing requests that took at least 1 second/i),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Download clean HAR" })).toBeVisible();
   await expect(page.getByText("proof of a server-side root cause")).toBeVisible();
 });

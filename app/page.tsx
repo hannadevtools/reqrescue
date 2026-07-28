@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "landing" | "report";
 type RequestFilter = "failures" | "slow" | "all";
+const SLOW_REQUEST_THRESHOLD_MS = 1_000;
 type StoredCase = {
   id: string;
   savedAt: string;
@@ -148,7 +149,7 @@ function loadHistory(): StoredCase[] {
 
 function Logo() {
   return (
-    <a className="brand" href="#" aria-label="ReqRescue home">
+    <a className="brand" href="/" aria-label="ReqRescue home">
       <span className="brand-mark" aria-hidden="true">
         R<span>R</span>
       </span>
@@ -382,26 +383,18 @@ function ProModal({
 }
 
 function Header({
-  report,
   proUnlocked,
   onOpenPro,
 }: {
-  report: boolean;
   proUnlocked: boolean;
   onOpenPro: () => void;
 }) {
-  const links = report
-    ? [
-        ["Evidence", "#evidence"],
-        ["Handoff", "#handoff"],
-        ["Feedback", "#feedback"],
-      ]
-    : [
-        ["How it works", "#how-it-works"],
-        ["Privacy", "#privacy"],
-        ["FAQ", "#faq"],
-        ["For teams", "#roadmap"],
-      ];
+  const links = [
+    ["How it works", "/#how-it-works"],
+    ["Privacy", "/#privacy"],
+    ["FAQ", "/#faq"],
+    ["For teams", "/#roadmap"],
+  ];
 
   return (
     <header className="site-header">
@@ -504,7 +497,11 @@ function UploadPanel({
         <span>HAR</span>
         <i />
       </div>
-      <h2>{busy ? busyMessage || "Reading the trace…" : "Drop a HAR. Get the case."}</h2>
+      <h2>
+        {busy
+          ? busyMessage || "Reading the trace…"
+          : "Drop the browser recording (HAR)."}
+      </h2>
       <p>
         Nothing is uploaded. Your browser performs the entire analysis and
         redaction locally.
@@ -537,7 +534,7 @@ function UploadPanel({
         {Math.round(maxFileBytes / 1024 / 1024)} MB
       </p>
       <details className="har-help">
-        <summary>What is a HAR — and how do I get one?</summary>
+        <summary>Need a HAR? Export one in 3 steps.</summary>
         <div>
           <p>
             A HAR is a browser recording of the network requests made while a
@@ -588,18 +585,19 @@ function Hero({
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">
-            <span>Free HAR analyzer + sanitizer</span>
+            <span>Free browser-error analyzer · 0 bytes uploaded</span>
             <i />
           </p>
           <h1>
-            Stop sending raw traces.
+            A website broke.
             <br />
-            Send <em>the case.</em>
+            Send <em>evidence, not guesswork.</em>
           </h1>
           <p className="hero-lede">
-            ReqRescue turns a browser HAR into a ranked incident brief, a
-            scrubbed evidence file, and a bug report your engineer can act on—
-            without uploading the trace.
+            A HAR is the browser&apos;s recording of what happened while a page
+            failed. ReqRescue finds the likely failure points, removes common
+            secrets, and turns that recording into a ready-to-send bug report.
+            The file never leaves this tab.
           </p>
           <div className="proof-strip">
             <div>
@@ -714,7 +712,7 @@ function HowItWorks() {
               <h3>Reconstruct the failure</h3>
               <p>
                 Group repeated failures, trace status patterns, isolate slow-tail
-                requests, and flag redirect churn.
+                requests, and spot redirect loops that keep the browser in circles.
               </p>
             </div>
           </article>
@@ -962,7 +960,7 @@ function Landing({
 }) {
   return (
     <>
-      <Header report={false} proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
+      <Header proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
       <main>
         <Hero
           busy={busy}
@@ -1055,8 +1053,9 @@ function Report({
     if (filter === "failures") return analysis.requests.filter((row) => row.failure);
     if (filter === "slow") {
       return [...analysis.requests]
+        .filter((row) => row.duration >= SLOW_REQUEST_THRESHOLD_MS)
         .sort((a, b) => b.duration - a.duration)
-        .slice(0, 15);
+        .slice(0, 50);
     }
     return analysis.requests.slice(0, 100);
   }, [analysis.requests, filter]);
@@ -1139,7 +1138,7 @@ function Report({
 
   return (
     <>
-      <Header report proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
+      <Header proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
       <main className="report-shell">
         <section className="report-heading">
           <div>
@@ -1251,7 +1250,7 @@ function Report({
                       className={filter === item ? "active" : ""}
                       onClick={() => setFilter(item)}
                     >
-                      {item}
+                      {item === "slow" ? "slow ≥ 1 s" : item}
                     </button>
                   ))}
                 </div>
@@ -1302,6 +1301,11 @@ function Report({
                 <p className="table-note">
                   Showing the first 100 requests. The exports retain all{" "}
                   {analysis.totalRequests}.
+                </p>
+              )}
+              {filter === "slow" && (
+                <p className="table-note">
+                  Showing requests that took at least 1 second, slowest first.
                 </p>
               )}
             </section>

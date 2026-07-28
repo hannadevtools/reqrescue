@@ -605,6 +605,7 @@ function normalizedEndpointPath(path: string): string {
 function buildSuspects(rows: RequestRow[]): Suspect[] {
   const suspects: Array<Omit<Suspect, "rank"> & { score: number }> = [];
   const failures = rows.filter((row) => row.failure);
+  const correlatedAuthRequestIds = new Set<number>();
 
   const groupedFailures = new Map<string, RequestRow[]>();
   for (const row of failures) {
@@ -612,7 +613,42 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     groupedFailures.set(key, [...(groupedFailures.get(key) ?? []), row]);
   }
 
+  const authFailuresByHost = new Map<string, RequestRow[]>();
+  for (const row of failures.filter((item) => item.status === 401 || item.status === 403)) {
+    const key = `${row.status}:${row.host}`;
+    authFailuresByHost.set(key, [...(authFailuresByHost.get(key) ?? []), row]);
+  }
+
+  for (const group of authFailuresByHost.values()) {
+    const endpoints = [...new Set(group.map((row) => normalizedEndpointPath(row.path)))];
+    if (group.length < 2 || endpoints.length < 2) continue;
+
+    group.forEach((row) => correlatedAuthRequestIds.add(row.id));
+    const ordered = [...group].sort((a, b) => a.id - b.id);
+    const status = ordered[0].status;
+    suspects.push({
+      score: 88 + Math.min(8, group.length - 2),
+      confidence: group.length >= 3 ? "high" : "medium",
+      title: `Authentication chain failed on ${ordered[0].host}`,
+      explanation:
+        `${group.length} related requests failed with HTTP ${status} across ` +
+        `${endpoints.length} endpoints. The order suggests one broken authentication ` +
+        "or session-refresh flow rather than unrelated endpoint failures.",
+      nextStep:
+        "Start with a fresh session, then compare the first rejected request with the refresh request in the authentication service logs at these capture timestamps.",
+      evidence: [
+        `${group.length} failed requests across ${endpoints.length} endpoints`,
+        `Sequence: ${ordered
+          .slice(0, 4)
+          .map((row) => `${row.method} ${row.path.split("?")[0]}`)
+          .join(" → ")}`,
+        `HTTP ${status}`,
+      ],
+    });
+  }
+
   for (const group of groupedFailures.values()) {
+    if (group.every((row) => correlatedAuthRequestIds.has(row.id))) continue;
     const sample = group[0];
     const status = sample.status;
     const explanation =
