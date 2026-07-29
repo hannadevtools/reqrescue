@@ -5,18 +5,14 @@ import {
   analyzeHar,
   buildDemoHar,
   buildSanitizedPreview,
-  FREE_MAX_FILE_BYTES,
   formatBytes,
   formatDuration,
-  SUPPORTER_MAX_FILE_BYTES,
+  MAX_HAR_FILE_BYTES,
 } from "./trace-engine";
-import {
-  isActiveGumroadPurchase,
-  type GumroadLicenseResponse,
-} from "./license";
+import { type HarComparison } from "./trace-compare";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type View = "landing" | "report";
+type View = "landing" | "report" | "comparison";
 type RequestFilter = "failures" | "slow" | "all";
 const SLOW_REQUEST_THRESHOLD_MS = 1_000;
 type StoredCase = {
@@ -35,13 +31,12 @@ type ActiveJob = {
 type HarWorkerMessage =
   | { type: "progress"; message: string }
   | { type: "complete"; analysis: Analysis }
+  | { type: "comparison-complete"; comparison: HarComparison }
   | { type: "error"; message: string };
 
-const GUMROAD_PRODUCT_URL = "https://hannadev.gumroad.com/l/reqrescue-pro";
-const GUMROAD_PRODUCT_ID = "JMi_OpMKayarptn0vFkQtg==";
 const GITHUB_URL = "https://github.com/hannadevtools/reqrescue";
-const PRO_STORAGE_KEY = "reqrescue-pro-unlocked";
 const HISTORY_STORAGE_KEY = "reqrescue-case-history";
+const MAX_FILE_BYTES = MAX_HAR_FILE_BYTES;
 
 function storageGet(key: string): string | null {
   try {
@@ -88,8 +83,9 @@ function acquisitionSource() {
   const params = new URLSearchParams(window.location.search);
   const source = params.get("utm_source");
   const medium = params.get("utm_medium");
+  const campaign = params.get("utm_campaign");
   if (source) {
-    return [source, medium]
+    return [source, medium, campaign]
       .filter(Boolean)
       .map((value) => value!.replace(/[^a-z0-9_-]/gi, "").slice(0, 40))
       .filter(Boolean)
@@ -158,22 +154,15 @@ function Logo() {
   );
 }
 
-function ProModal({
+function HistoryModal({
   open,
-  unlocked,
   history,
   onClose,
-  onUnlock,
 }: {
   open: boolean;
-  unlocked: boolean;
   history: StoredCase[];
   onClose: () => void;
-  onUnlock: (licenseKey: string) => Promise<void>;
 }) {
-  const [licenseKey, setLicenseKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
   const modalRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -228,30 +217,11 @@ function ProModal({
 
   if (!open) return null;
 
-  const activate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!licenseKey.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
-      await onUnlock(licenseKey);
-      setLicenseKey("");
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "That key could not be verified. Check it and try again.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const copySavedCase = async (item: StoredCase) => {
     try {
       await navigator.clipboard.writeText(item.markdown);
       setCopied(item.id);
-      void track("pro_history_copy");
+      void track("history_copy");
     } catch {
       setCopied("error");
     }
@@ -271,7 +241,7 @@ function ProModal({
         className="pro-modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="pro-modal-title"
+        aria-labelledby="history-modal-title"
       >
         <button
           ref={closeRef}
@@ -282,118 +252,53 @@ function ProModal({
           ×
         </button>
         <p className="eyebrow">
-          <span>
-            {unlocked ? "Supporter mode active on this browser" : "Voluntary honorware support"}
-          </span>
+          <span>Free local workspace · this browser only</span>
           <i />
         </p>
-        <h2 id="pro-modal-title">
-          {unlocked
-            ? "Thank you for supporting the open-source tool."
-            : "Support ReqRescue · $12 honorware"}
-        </h2>
-
-        {unlocked ? (
-          <>
-            <ul className="pro-feature-list">
-              <li>Print or save complete incident briefs as PDF</li>
-              <li>Analyze local HAR files up to the protected 75 MB limit</li>
-              <li>Keep up to 10 incident briefs on this device</li>
-            </ul>
-            <div className="case-history">
-              <header>
-                <b>Saved on this device</b>
-                <span>{history.length}/10</span>
-              </header>
-              {history.length ? (
-                history.map((item) => (
-                  <article key={item.id}>
-                    <div>
-                      <b>{item.title}</b>
-                      <small>
-                        {item.sourceName} ·{" "}
-                        {new Date(item.savedAt).toLocaleDateString()}
-                      </small>
-                    </div>
-                    <button onClick={() => copySavedCase(item)}>
-                      {copied === item.id
-                        ? "Copied"
-                        : copied === "error"
-                          ? "Copy failed"
-                          : "Copy report"}
-                    </button>
-                  </article>
-                ))
-              ) : (
-                <p>Save a generated report and it will appear here.</p>
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="pro-modal-copy">
-              The analyzer, sanitizer, Markdown report, and clean HAR stay free.
-              This voluntary honorware purchase supports the hosted build and
-              unlocks convenience features locally—without an account or subscription.
-            </p>
-            <ul className="pro-feature-list">
-              <li>Print-ready PDF incident brief</li>
-              <li>Protected 75 MB local file limit</li>
-              <li>On-device history for 10 cases</li>
-            </ul>
-            <a
-              className="button button-primary pro-buy-button"
-              href={GUMROAD_PRODUCT_URL}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => void track("pro_checkout_click", "modal")}
-            >
-              Support and unlock · $12 once
-            </a>
-            <form className="license-form" onSubmit={activate}>
-              <label htmlFor="license-key">Already bought it? Paste your license key</label>
-              <div>
-                <input
-                  id="license-key"
-                  value={licenseKey}
-                  onChange={(event) => {
-                    setLicenseKey(event.target.value);
-                    if (error) setError("");
-                  }}
-                  placeholder="XXXX-XXXX-XXXX-XXXX"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button disabled={busy || !licenseKey.trim()}>
-                  {busy ? "Checking…" : "Unlock"}
+        <h2 id="history-modal-title">Saved incident briefs</h2>
+        <p className="pro-modal-copy">
+          Keep up to 10 reports on this device. No account, payment, or cloud
+          storage is involved.
+        </p>
+        <div className="case-history">
+          <header>
+            <b>Saved on this device</b>
+            <span>{history.length}/10</span>
+          </header>
+          {history.length ? (
+            history.map((item) => (
+              <article key={item.id}>
+                <div>
+                  <b>{item.title}</b>
+                  <small>
+                    {item.sourceName} ·{" "}
+                    {new Date(item.savedAt).toLocaleDateString()}
+                  </small>
+                </div>
+                <button onClick={() => copySavedCase(item)}>
+                  {copied === item.id
+                    ? "Copied"
+                    : copied === "error"
+                      ? "Copy failed"
+                      : "Copy report"}
                 </button>
-              </div>
-              {error && <p role="alert">{error}</p>}
-            </form>
-            <small className="license-privacy">
-              Verification sends only this key to Gumroad. It never sends your
-              HAR, file name, URLs, headers, or bodies. The local unlock is
-              intentionally lightweight because the core is open source.
-            </small>
-          </>
-        )}
+              </article>
+            ))
+          ) : (
+            <p>Save a generated report and it will appear here.</p>
+          )}
+        </div>
       </section>
     </div>
   );
 }
 
-function Header({
-  proUnlocked,
-  onOpenPro,
-}: {
-  proUnlocked: boolean;
-  onOpenPro: () => void;
-}) {
+function Header({ onOpenHistory }: { onOpenHistory: () => void }) {
   const links = [
     ["How it works", "/#how-it-works"],
     ["Privacy", "/#privacy"],
     ["FAQ", "/#faq"],
-    ["For teams", "/#roadmap"],
+    ["Help cats", "/#help-cats"],
   ];
 
   return (
@@ -420,8 +325,8 @@ function Header({
         <a className="github-link" href={GITHUB_URL} target="_blank" rel="noreferrer">
           Open source <span aria-hidden="true">↗</span>
         </a>
-        <button className="pro-link" onClick={onOpenPro}>
-          {proUnlocked ? "Supporter mode" : "Support · $12"}
+        <button className="pro-link" onClick={onOpenHistory}>
+          Saved cases
         </button>
       </div>
     </header>
@@ -442,7 +347,9 @@ function UploadPanel({
   busy,
   busyMessage,
   error,
+  comparisonIntent,
   onFile,
+  onCompare,
   onDemo,
   onCancel,
   maxFileBytes,
@@ -450,12 +357,15 @@ function UploadPanel({
   busy: boolean;
   busyMessage: string;
   error: string;
+  comparisonIntent: boolean;
   onFile: (file: File) => void;
+  onCompare: (files: File[]) => void;
   onDemo: () => void;
   onCancel: () => void;
   maxFileBytes: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const compareInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
   const acceptFile = (file?: File) => {
@@ -476,7 +386,12 @@ function UploadPanel({
       onDrop={(event) => {
         event.preventDefault();
         setDragging(false);
-        acceptFile(event.dataTransfer.files[0]);
+        const files = [...event.dataTransfer.files];
+        if (files.length === 2) {
+          onCompare(files);
+        } else {
+          acceptFile(files[0]);
+        }
       }}
     >
       <input
@@ -493,6 +408,21 @@ function UploadPanel({
           acceptFile(file);
         }}
       />
+      <input
+        ref={compareInputRef}
+        type="file"
+        accept=".har,.json,application/json"
+        multiple
+        hidden
+        onClick={(event) => {
+          event.currentTarget.value = "";
+        }}
+        onChange={(event) => {
+          const files = [...(event.target.files ?? [])];
+          event.currentTarget.value = "";
+          onCompare(files);
+        }}
+      />
       <div className="drop-symbol" aria-hidden="true">
         <span>HAR</span>
         <i />
@@ -500,16 +430,30 @@ function UploadPanel({
       <h2>
         {busy
           ? busyMessage || "Reading the trace…"
-          : "Drop the browser recording (HAR)."}
+          : comparisonIntent
+            ? "Choose the working HAR and the changed HAR."
+            : "Drop the browser recording (HAR)."}
       </h2>
       <p>
-        Nothing is uploaded. Your browser performs the entire analysis and
-        redaction locally.
+        {comparisonIntent
+          ? "Select both files together—baseline first, changed or broken capture second. The comparison stays in this tab."
+          : "Nothing is uploaded. Your browser performs the entire analysis and redaction locally."}
       </p>
       <div className="upload-actions">
-        <button className="button button-demo" disabled={busy} onClick={onDemo}>
-          Run a 15-second demo — no HAR needed
-        </button>
+        {comparisonIntent && (
+          <button
+            className="button button-demo button-compare"
+            disabled={busy}
+            onClick={() => compareInputRef.current?.click()}
+          >
+            Choose baseline + changed HAR
+          </button>
+        )}
+        {!comparisonIntent && (
+          <button className="button button-demo" disabled={busy} onClick={onDemo}>
+            Run a 15-second demo — no HAR needed
+          </button>
+        )}
         <button
           className="button button-outline"
           disabled={busy}
@@ -523,6 +467,20 @@ function UploadPanel({
             "Choose HAR file"
           )}
         </button>
+        {!comparisonIntent && (
+          <button
+            className="button button-outline button-compare"
+            disabled={busy}
+            onClick={() => compareInputRef.current?.click()}
+          >
+            Compare two HARs (A/B)
+          </button>
+        )}
+        {comparisonIntent && (
+          <button className="button button-outline" disabled={busy} onClick={onDemo}>
+            See a single-HAR demo instead
+          </button>
+        )}
         {busy && (
           <button className="button button-quiet" onClick={onCancel}>
             Cancel local analysis
@@ -531,7 +489,8 @@ function UploadPanel({
       </div>
       <p className="file-note">
         Chrome, Firefox, Edge, Safari · protected local limit{" "}
-        {Math.round(maxFileBytes / 1024 / 1024)} MB
+        {Math.round(maxFileBytes / 1024 / 1024)} MB per file · for A/B, choose
+        baseline first and changed capture second
       </p>
       <details className="har-help">
         <summary>Need a HAR? Export one in 3 steps.</summary>
@@ -567,7 +526,9 @@ function Hero({
   busy,
   busyMessage,
   error,
+  comparisonIntent,
   onFile,
+  onCompare,
   onDemo,
   onCancel,
   maxFileBytes,
@@ -575,7 +536,9 @@ function Hero({
   busy: boolean;
   busyMessage: string;
   error: string;
+  comparisonIntent: boolean;
   onFile: (file: File) => void;
+  onCompare: (files: File[]) => void;
   onDemo: () => void;
   onCancel: () => void;
   maxFileBytes: number;
@@ -585,19 +548,30 @@ function Hero({
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">
-            <span>Free browser-error analyzer · 0 bytes uploaded</span>
+            <span>
+              {comparisonIntent
+                ? "Free local HAR regression comparison · 0 bytes uploaded"
+                : "Free browser-error analyzer · 0 bytes uploaded"}
+            </span>
             <i />
           </p>
-          <h1>
-            A website broke.
-            <br />
-            Send <em>evidence, not guesswork.</em>
-          </h1>
+          {comparisonIntent ? (
+            <h1>
+              Two HARs.
+              <br />
+              <em>Find what changed.</em>
+            </h1>
+          ) : (
+            <h1>
+              A website broke.
+              <br />
+              Send <em>evidence, not guesswork.</em>
+            </h1>
+          )}
           <p className="hero-lede">
-            A HAR is the browser&apos;s recording of what happened while a page
-            failed. ReqRescue finds the likely failure points, removes common
-            secrets, and turns that recording into a ready-to-send bug report.
-            The file never leaves this tab.
+            {comparisonIntent
+              ? "Compare a working capture with a changed or broken one. ReqRescue ranks missing query keys, new failures, status transitions, endpoint changes, and latency regressions—without uploading either file."
+              : "A HAR is the browser's recording of what happened while a page failed. ReqRescue finds the likely failure points, removes common secrets, and turns that recording into a ready-to-send bug report. The file never leaves this tab."}
           </p>
           <div className="proof-strip">
             <div>
@@ -605,12 +579,12 @@ function Hero({
               <span>bytes uploaded</span>
             </div>
             <div>
-              <strong>&lt; 10s</strong>
-              <span>to first diagnosis</span>
+              <strong>{comparisonIntent ? "A/B" : "< 10s"}</strong>
+              <span>{comparisonIntent ? "ranked structural diff" : "to first diagnosis"}</span>
             </div>
             <div>
-              <strong>3</strong>
-              <span>export formats</span>
+              <strong>{comparisonIntent ? "2" : "3"}</strong>
+              <span>{comparisonIntent ? "clean HAR exports" : "export formats"}</span>
             </div>
           </div>
         </div>
@@ -618,7 +592,9 @@ function Hero({
           busy={busy}
           busyMessage={busyMessage}
           error={error}
+          comparisonIntent={comparisonIntent}
           onFile={onFile}
+          onCompare={onCompare}
           onDemo={onDemo}
           onCancel={onCancel}
           maxFileBytes={maxFileBytes}
@@ -882,55 +858,61 @@ function Faq() {
   );
 }
 
-function Roadmap({
-  onDemo,
-  onOpenPro,
-  proUnlocked,
-}: {
-  onDemo: () => void;
-  onOpenPro: () => void;
-  proUnlocked: boolean;
-}) {
+function CatSupport() {
   return (
-    <section className="section roadmap" id="roadmap">
+    <section className="section roadmap" id="help-cats">
       <div className="roadmap-copy">
         <p className="eyebrow">
-          <span>Voluntary honorware · one-time support</span>
+          <span>ReqRescue is free · pass the help forward</span>
           <i />
         </p>
-        <h2>Keep the rescue free. Support it if it saves you time.</h2>
+        <h2>Saved an hour? Help a cat instead.</h2>
         <p>
-          Analysis, redaction, clean HAR, and Markdown export stay free and open
-          source. The $12 honorware purchase is voluntary support for the hosted
-          build and unlocks local convenience features.
+          ReqRescue does not accept donations. Analysis, comparison, redaction,
+          PDF, local history, and exports are free. If the tool saved you time,
+          consider donating directly to one of these independent Israeli animal
+          organizations.
         </p>
         <div className="roadmap-actions">
-          <button className="button button-primary" onClick={onOpenPro}>
-            {proUnlocked ? "View Supporter history" : "Support ReqRescue · $12"}
-          </button>
-          <button className="button button-outline" onClick={onDemo}>
-            Open the demo case
-          </button>
+          <a
+            className="button button-primary"
+            href="https://isracats.org.il/donation/"
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => void track("cat_charity_click", "israel_cat_lovers")}
+          >
+            Help Israel Cat Lovers&apos; Society ↗
+          </a>
+          <a
+            className="button button-outline"
+            href="https://www.sospets.co.il/donationen"
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => void track("cat_charity_click", "sos_pets_israel")}
+          >
+            Help S.O.S Pets Israel ↗
+          </a>
         </div>
         <small className="pilot-fineprint">
-          Voluntary honorware. No account or subscription. 30-day money-back guarantee.
+          These links go straight to the organizations&apos; official donation
+          pages. ReqRescue is not affiliated with them and receives nothing.
         </small>
       </div>
       <div className="pilot-offer">
         <header>
-          <span>Suggested support</span>
-          <strong>$12<small> once</small></strong>
+          <span>What remains free</span>
+          <strong>100<small>%</small></strong>
         </header>
-        <p>For people who use HARs often enough to want a faster handoff.</p>
+        <p>No paywall, license key, account, subscription, or donation to us.</p>
         <ul>
-          <li>Print or save the full incident brief as PDF</li>
-          <li>Analyze files up to the protected 75 MB limit</li>
-          <li>Save 10 case reports on this device</li>
-          <li>Future Supporter convenience exports included</li>
+          <li>Analyze or compare local HAR files up to 75 MB each</li>
+          <li>Download clean HAR and Markdown reports</li>
+          <li>Print or save full incident briefs as PDF</li>
+          <li>Save 10 case reports locally on this device</li>
         </ul>
         <small>
-          The free core is not crippled, timed, or account-gated. The local
-          honorware unlock is intentionally lightweight.
+          The two organizations above independently help homeless, injured, and
+          abandoned cats in Israel.
         </small>
       </div>
     </section>
@@ -941,32 +923,36 @@ function Landing({
   busy,
   busyMessage,
   error,
+  comparisonIntent,
   onFile,
+  onCompare,
   onDemo,
   onCancel,
   maxFileBytes,
-  proUnlocked,
-  onOpenPro,
+  onOpenHistory,
 }: {
   busy: boolean;
   busyMessage: string;
   error: string;
+  comparisonIntent: boolean;
   onFile: (file: File) => void;
+  onCompare: (files: File[]) => void;
   onDemo: () => void;
   onCancel: () => void;
   maxFileBytes: number;
-  proUnlocked: boolean;
-  onOpenPro: () => void;
+  onOpenHistory: () => void;
 }) {
   return (
     <>
-      <Header proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
+      <Header onOpenHistory={onOpenHistory} />
       <main>
         <Hero
           busy={busy}
           busyMessage={busyMessage}
           error={error}
+          comparisonIntent={comparisonIntent}
           onFile={onFile}
+          onCompare={onCompare}
           onDemo={onDemo}
           onCancel={onCancel}
           maxFileBytes={maxFileBytes}
@@ -976,11 +962,7 @@ function Landing({
         <BeforeAfter />
         <Privacy />
         <Faq />
-        <Roadmap
-          onDemo={onDemo}
-          onOpenPro={onOpenPro}
-          proUnlocked={proUnlocked}
-        />
+        <CatSupport />
       </main>
       <Footer />
     </>
@@ -1028,14 +1010,12 @@ function BreakableTitle({ value }: { value: string }) {
 function Report({
   analysis,
   onReset,
-  proUnlocked,
-  onOpenPro,
+  onOpenHistory,
   onSaveCase,
 }: {
   analysis: Analysis;
   onReset: () => void;
-  proUnlocked: boolean;
-  onOpenPro: () => void;
+  onOpenHistory: () => void;
   onSaveCase: (analysis: Analysis) => void;
 }) {
   const [filter, setFilter] = useState<RequestFilter>("failures");
@@ -1112,19 +1092,11 @@ function Report({
   };
 
   const printReport = () => {
-    if (!proUnlocked) {
-      onOpenPro();
-      return;
-    }
-    void track("pro_pdf_print");
+    void track("pdf_print");
     window.print();
   };
 
   const saveCase = () => {
-    if (!proUnlocked) {
-      onOpenPro();
-      return;
-    }
     setActionError("");
     try {
       onSaveCase(analysis);
@@ -1138,7 +1110,7 @@ function Report({
 
   return (
     <>
-      <Header proUnlocked={proUnlocked} onOpenPro={onOpenPro} />
+      <Header onOpenHistory={onOpenHistory} />
       <main className="report-shell">
         <section className="report-heading">
           <div>
@@ -1168,14 +1140,10 @@ function Report({
               Download report
             </button>
             <button className="button button-outline" onClick={printReport}>
-              {proUnlocked ? "Print / save PDF" : "PDF · Supporter"}
+              Print / save PDF
             </button>
             <button className="button button-outline" onClick={saveCase}>
-              {caseSaved
-                ? "Saved locally"
-                : proUnlocked
-                  ? "Save case"
-                  : "History · Supporter"}
+              {caseSaved ? "Saved locally" : "Save case"}
             </button>
           </div>
           {actionError && (
@@ -1237,10 +1205,45 @@ function Report({
               </div>
             </section>
 
+            {analysis.diagnosticClues.length > 0 && (
+              <section className="report-card suspects-card">
+                <header className="card-header">
+                  <div>
+                    <span className="card-index">02</span>
+                    <h2>Safe error clues</h2>
+                  </div>
+                  <small>Bounded JSON metadata · raw bodies stripped</small>
+                </header>
+                <div className="suspects">
+                  {analysis.diagnosticClues.map((item) => (
+                    <article className="suspect" key={item.requestId}>
+                      <span className="status-pill status-failed">{item.status}</span>
+                      <div>
+                        <div className="suspect-title">
+                          <h3>{item.endpoint}</h3>
+                        </div>
+                        <p>
+                          ReqRescue retained only bounded error identifiers,
+                          dependency names, retryability, and validation field paths.
+                        </p>
+                        <ul>
+                          {item.clues.map((clue) => (
+                            <li key={clue}>{clue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="report-card">
               <header className="card-header request-header">
                 <div>
-                  <span className="card-index">02</span>
+                  <span className="card-index">
+                    {analysis.diagnosticClues.length ? "03" : "02"}
+                  </span>
                   <h2>Request evidence</h2>
                 </div>
                 <div className="filters" aria-label="Filter requests">
@@ -1315,7 +1318,9 @@ function Report({
             <section className="report-card privacy-card">
               <header className="card-header compact">
                 <div>
-                  <span className="card-index">03</span>
+                  <span className="card-index">
+                    {analysis.diagnosticClues.length ? "04" : "03"}
+                  </span>
                   <h2>Privacy sweep</h2>
                 </div>
               </header>
@@ -1363,7 +1368,9 @@ function Report({
             <details className="report-card sanitized-preview">
               <summary>
                 <span>
-                  <i className="card-index">04</i>
+                  <i className="card-index">
+                    {analysis.diagnosticClues.length ? "05" : "04"}
+                  </i>
                   <b>Preview sanitized data</b>
                 </span>
                 <em>Inspect before export</em>
@@ -1384,7 +1391,9 @@ function Report({
             <section className="report-card export-card" id="handoff">
               <header className="card-header compact">
                 <div>
-                  <span className="card-index">05</span>
+                  <span className="card-index">
+                    {analysis.diagnosticClues.length ? "06" : "05"}
+                  </span>
                   <h2>Hand it off</h2>
                 </div>
               </header>
@@ -1445,18 +1454,21 @@ function Report({
             </section>
 
             <section className="report-card pilot-card">
-              <span>Voluntary Supporter honorware · $12 once</span>
-              <h2>Save the brief, not another subscription.</h2>
+              <span>Everything here is free</span>
+              <h2>Saved time? Help a cat instead.</h2>
               <p>
-                Add PDF handoff, larger local files, and on-device history. The
-                analyzer and sanitizer stay free and open source.
+                ReqRescue accepts no donations. If this report helped, consider
+                donating directly to an independent animal organization.
               </p>
-              <button
+              <a
                 className="button button-primary"
-                onClick={onOpenPro}
+                href="https://isracats.org.il/donation/"
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => void track("cat_charity_click", "report")}
               >
-                {proUnlocked ? "Open Supporter history" : "Support and unlock"}
-              </button>
+                Help cats in Israel ↗
+              </a>
             </section>
           </aside>
         </section>
@@ -1485,6 +1497,285 @@ function Report({
   );
 }
 
+function ComparisonReport({
+  comparison,
+  onReset,
+  onOpenHistory,
+}: {
+  comparison: HarComparison;
+  onReset: () => void;
+  onOpenHistory: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const { baseline, changed } = comparison;
+  const failureDelta = changed.failedRequests - baseline.failedRequests;
+  const latencyDelta = changed.p95Duration - baseline.p95Duration;
+  const latencyDeltaLabel = `${latencyDelta > 0 ? "+" : latencyDelta < 0 ? "−" : ""}${formatDuration(
+    Math.abs(latencyDelta),
+  )}`;
+
+  const copyReport = async () => {
+    setActionError("");
+    try {
+      await navigator.clipboard.writeText(comparison.markdown);
+      setCopied(true);
+      void track("comparison_copy_report");
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setActionError("Clipboard access was blocked. Download the report instead.");
+    }
+  };
+
+  const exportReport = () => {
+    downloadText(
+      `${safeBaseName(baseline.sourceName)}-vs-${safeBaseName(changed.sourceName)}.md`,
+      comparison.markdown,
+      "text/markdown",
+    );
+    void track("comparison_export_markdown");
+  };
+
+  const exportSanitized = (analysis: Analysis, label: "a" | "b") => {
+    downloadText(
+      `${label}-${safeBaseName(analysis.sourceName)}-sanitized.har`,
+      JSON.stringify(analysis.sanitized, null, 2),
+      "application/json",
+    );
+    void track("comparison_export_sanitized", label);
+  };
+
+  return (
+    <>
+      <Header onOpenHistory={onOpenHistory} />
+      <main className="report-shell comparison-shell">
+        <section className="report-heading">
+          <div>
+            <button className="back-button" onClick={onReset}>
+              ← Compare another pair
+            </button>
+            <p className="eyebrow">
+              <span>A/B HAR diff · generated locally</span>
+              <i />
+            </p>
+            <h1>
+              <BreakableTitle value={comparison.title} />
+            </h1>
+            <p>
+              Capture A is the baseline. Capture B is the changed or broken run.
+              ReqRescue compared only sanitized structure—never secret values.
+            </p>
+          </div>
+          <div className="report-actions">
+            <button className="button button-primary" onClick={copyReport}>
+              {copied ? "Copied" : "Copy comparison"}
+            </button>
+            <button className="button button-outline" onClick={exportReport}>
+              Download Markdown
+            </button>
+            <button className="button button-outline" onClick={() => window.print()}>
+              Print / save PDF
+            </button>
+          </div>
+          {actionError && (
+            <p className="action-error" role="alert">
+              {actionError}
+            </p>
+          )}
+        </section>
+
+        <section className="capture-pair" aria-label="Compared captures">
+          <article>
+            <span>A · BASELINE</span>
+            <b>{baseline.sourceName}</b>
+            <small>
+              {baseline.totalRequests} requests · {baseline.failedRequests} failed ·{" "}
+              {formatDuration(baseline.p95Duration)} p95
+            </small>
+          </article>
+          <div aria-hidden="true">→</div>
+          <article>
+            <span>B · CHANGED</span>
+            <b>{changed.sourceName}</b>
+            <small>
+              {changed.totalRequests} requests · {changed.failedRequests} failed ·{" "}
+              {formatDuration(changed.p95Duration)} p95
+            </small>
+          </article>
+        </section>
+
+        <section className="metrics-bar comparison-metrics" aria-label="Comparison summary">
+          <Metric value={String(comparison.changes.length)} label="ranked differences" />
+          <Metric
+            value={`${failureDelta > 0 ? "+" : ""}${failureDelta}`}
+            label="failed requests in B"
+            accent={failureDelta > 0 ? "danger" : "safe"}
+          />
+          <Metric
+            value={`${changed.totalRequests - baseline.totalRequests > 0 ? "+" : ""}${
+              changed.totalRequests - baseline.totalRequests
+            }`}
+            label="request-count delta"
+          />
+          <Metric
+            value={latencyDeltaLabel}
+            label="p95 latency delta"
+            accent={latencyDelta > 500 ? "danger" : undefined}
+          />
+          <Metric value={String(comparison.findingCount)} label="sensitive locations" />
+          <Metric
+            value={`${comparison.safetyScore}/100`}
+            label="lowest raw share-safety"
+            accent={comparison.safetyScore > 75 ? "safe" : "danger"}
+          />
+        </section>
+
+        <section className="report-grid">
+          <div className="report-main">
+            <section className="report-card suspects-card">
+              <header className="card-header">
+                <div>
+                  <span className="card-index">01</span>
+                  <h2>Ranked structural differences</h2>
+                </div>
+                <small>Facts first · causality requires confirmation</small>
+              </header>
+              <div className="suspects">
+                {comparison.changes.length ? (
+                  comparison.changes.map((change) => (
+                    <article className="suspect" key={`${change.rank}-${change.title}`}>
+                      <span className="suspect-rank">
+                        {String(change.rank).padStart(2, "0")}
+                      </span>
+                      <div>
+                        <div className="suspect-title">
+                          <h3>{change.title}</h3>
+                          <Confidence value={change.confidence} />
+                        </div>
+                        <p>{change.explanation}</p>
+                        <div className="suspect-next">
+                          <span>Recommended next check</span>
+                          <p>{change.nextStep}</p>
+                        </div>
+                        <ul>
+                          {change.evidence.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <article className="suspect comparison-empty">
+                    <span className="suspect-rank">00</span>
+                    <div>
+                      <h3>No material structural difference detected</h3>
+                      <p>
+                        Compare console, WebSocket, DRM/EME, DOM, or private
+                        response semantics next; those signals can sit outside HAR.
+                      </p>
+                    </div>
+                  </article>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <aside className="report-side">
+            <section className="report-card privacy-card">
+              <header className="card-header compact">
+                <div>
+                  <span className="card-index">02</span>
+                  <h2>Privacy sweep</h2>
+                </div>
+              </header>
+              <p className="comparison-side-copy">
+                The two raw traces contain {comparison.findingCount} detected
+                sensitive location{comparison.findingCount === 1 ? "" : "s"}.
+                ReqRescue compared redacted URLs and query-key names—not their
+                values.
+              </p>
+              <div className="comparison-downloads">
+                <button onClick={() => exportSanitized(baseline, "a")}>
+                  Download clean capture A
+                </button>
+                <button onClick={() => exportSanitized(changed, "b")}>
+                  Download clean capture B
+                </button>
+              </div>
+              <p className="privacy-warning">
+                Always review exports for product-specific identifiers before
+                sharing.
+              </p>
+            </section>
+
+            <section className="report-card export-card">
+              <header className="card-header compact">
+                <div>
+                  <span className="card-index">03</span>
+                  <h2>Hand it off</h2>
+                </div>
+              </header>
+              <button onClick={copyReport}>
+                <span>
+                  <b>Copy A/B bug report</b>
+                  <small>Markdown · ranked differences · ReqRescue footer</small>
+                </span>
+                <em>{copied ? "Copied" : "Copy"}</em>
+              </button>
+              <button onClick={exportReport}>
+                <span>
+                  <b>Download comparison</b>
+                  <small>Ready for GitHub, Jira, Slack, or email</small>
+                </span>
+                <em>MD</em>
+              </button>
+            </section>
+
+            <section className="report-card pilot-card">
+              <span>ReqRescue accepts no donations</span>
+              <h2>Saved time? Help a cat instead.</h2>
+              <p>
+                Donate directly to a real animal organization. We receive
+                nothing.
+              </p>
+              <a
+                className="button button-primary"
+                href="https://isracats.org.il/donation/"
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => void track("cat_charity_click", "comparison")}
+              >
+                Help cats in Israel ↗
+              </a>
+            </section>
+          </aside>
+        </section>
+
+        <section className="report-disclaimer">
+          <b>What this comparison is:</b> deterministic structural diff of two
+          sanitized HARs. <b>What it is not:</b> proof that the highest-ranked
+          difference caused the symptom.
+        </section>
+
+        <section className="report-signature" aria-label="ReqRescue report attribution">
+          <span className="report-signature-mark" aria-hidden="true">
+            R
+          </span>
+          <div>
+            <small>Comparison generated locally by</small>
+            <b>ReqRescue</b>
+          </div>
+          <a href="https://app.reqrescue.workers.dev">
+            Compare another pair ↗
+          </a>
+        </section>
+      </main>
+      <Footer />
+    </>
+  );
+}
+
 function Footer() {
   return (
     <footer className="site-footer">
@@ -1504,19 +1795,22 @@ function Footer() {
 export default function Home() {
   const [view, setView] = useState<View>("landing");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [comparison, setComparison] = useState<HarComparison | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyMessage, setBusyMessage] = useState("");
   const [error, setError] = useState("");
-  const [proUnlocked, setProUnlocked] = useState(false);
-  const [proOpen, setProOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<StoredCase[]>([]);
+  const [comparisonIntent, setComparisonIntent] = useState(false);
   const activeJobRef = useRef<ActiveJob | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.reqrescueReady = "true";
+    setComparisonIntent(
+      new URLSearchParams(window.location.search).get("mode") === "compare",
+    );
     void track("page_view", acquisitionSource());
     const initialization = window.setTimeout(() => {
-      setProUnlocked(storageGet(PRO_STORAGE_KEY) === "true");
       setHistory(loadHistory());
     }, 0);
     return () => {
@@ -1530,6 +1824,7 @@ export default function Home() {
 
   const finish = useCallback((next: Analysis, source: "file" | "demo") => {
     setAnalysis(next);
+    setComparison(null);
     setView("report");
     setBusy(false);
     setBusyMessage("");
@@ -1538,15 +1833,23 @@ export default function Home() {
     void track("analysis_complete", source);
   }, []);
 
+  const finishComparison = useCallback((next: HarComparison) => {
+    setComparison(next);
+    setAnalysis(null);
+    setView("comparison");
+    setBusy(false);
+    setBusyMessage("");
+    setError("");
+    window.scrollTo({ top: 0, behavior: "instant" });
+    void track("comparison_complete", "file");
+  }, []);
+
   const handleFile = useCallback(
     async (file: File) => {
       setError("");
-      const maxBytes = proUnlocked ? SUPPORTER_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES;
-      if (file.size > maxBytes) {
+      if (file.size > MAX_FILE_BYTES) {
         setError(
-          proUnlocked
-            ? "The protected Supporter limit is 75 MB. Larger files need a future streaming parser."
-            : "The protected free limit is 25 MB. Honorware Supporter mode raises it to 75 MB.",
+          "The protected local limit is 75 MB. Larger files need a future streaming parser.",
         );
         return;
       }
@@ -1555,6 +1858,7 @@ export default function Home() {
       activeJobRef.current = job;
       setBusy(true);
       setBusyMessage("Reading the HAR locally…");
+      void track("analysis_started", "file");
       try {
         const buffer = await file.arrayBuffer();
         if (job.cancelled) return;
@@ -1571,7 +1875,7 @@ export default function Home() {
               setBusyMessage(event.data.message);
             } else if (event.data.type === "complete") {
               resolve(event.data.analysis);
-            } else {
+            } else if (event.data.type === "error") {
               reject(new Error(event.data.message));
             }
           };
@@ -1601,7 +1905,87 @@ export default function Home() {
         void track("analysis_error");
       }
     },
-    [finish, proUnlocked],
+    [finish],
+  );
+
+  const handleCompare = useCallback(
+    async (files: File[]) => {
+      setError("");
+      if (files.length !== 2) {
+        setError(
+          "Choose exactly two HAR files: capture A (baseline) first, then capture B (changed or broken).",
+        );
+        return;
+      }
+      if (files.some((file) => file.size > MAX_FILE_BYTES)) {
+        setError(
+          "Each HAR must stay within the protected 75 MB local limit.",
+        );
+        return;
+      }
+
+      const [baselineFile, changedFile] = files;
+      const job: ActiveJob = { cancelled: false };
+      activeJobRef.current?.worker?.terminate();
+      activeJobRef.current = job;
+      setBusy(true);
+      setBusyMessage("Reading capture A locally…");
+      void track("comparison_started", "file");
+
+      try {
+        const [baselineBuffer, changedBuffer] = await Promise.all([
+          baselineFile.arrayBuffer(),
+          changedFile.arrayBuffer(),
+        ]);
+        if (job.cancelled) return;
+
+        const worker = new Worker(new URL("./har.worker.ts", import.meta.url), {
+          type: "module",
+        });
+        job.worker = worker;
+        const next = await new Promise<HarComparison>((resolve, reject) => {
+          job.cancelPromise = () => reject(new Error("Local comparison canceled."));
+          worker.onmessage = (event: MessageEvent<HarWorkerMessage>) => {
+            if (job.cancelled) return;
+            if (event.data.type === "progress") {
+              setBusyMessage(event.data.message);
+            } else if (event.data.type === "comparison-complete") {
+              resolve(event.data.comparison);
+            } else if (event.data.type === "error") {
+              reject(new Error(event.data.message));
+            }
+          };
+          worker.onerror = () => {
+            reject(new Error("The local comparison worker stopped unexpectedly."));
+          };
+          worker.postMessage(
+            {
+              type: "compare",
+              baselineBuffer,
+              baselineName: baselineFile.name,
+              changedBuffer,
+              changedName: changedFile.name,
+            },
+            [baselineBuffer, changedBuffer],
+          );
+        });
+        worker.terminate();
+        if (job.cancelled) return;
+        activeJobRef.current = null;
+        finishComparison(next);
+      } catch (reason) {
+        job.worker?.terminate();
+        if (job.cancelled) return;
+        activeJobRef.current = null;
+        setBusy(false);
+        setBusyMessage("");
+        setError(
+          reason instanceof Error ? reason.message : "Unknown comparison error.",
+        );
+        void track("comparison_error");
+      }
+    },
+    [finishComparison],
   );
 
   const handleDemo = useCallback(() => {
@@ -1611,6 +1995,7 @@ export default function Home() {
     setBusy(true);
     setBusyMessage("Building the synthetic local demo…");
     setError("");
+    void track("analysis_started", "demo");
     job.timer = window.setTimeout(() => {
       if (job.cancelled) return;
       try {
@@ -1642,39 +2027,11 @@ export default function Home() {
   const reset = () => {
     setView("landing");
     setAnalysis(null);
+    setComparison(null);
     setBusy(false);
     setBusyMessage("");
     setError("");
     window.scrollTo({ top: 0, behavior: "instant" });
-  };
-
-  const unlockPro = async (rawKey: string) => {
-    const licenseKey = rawKey.trim();
-    const body = new URLSearchParams({
-      product_id: GUMROAD_PRODUCT_ID,
-      license_key: licenseKey,
-      increment_uses_count: "false",
-    });
-    const response = await fetch("https://api.gumroad.com/v2/licenses/verify", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    });
-
-    if (!response.ok) {
-      void track("pro_activation_error", "invalid");
-      throw new Error("That license key was not accepted. Copy it from your Gumroad receipt.");
-    }
-
-    const result = (await response.json()) as GumroadLicenseResponse;
-    if (!isActiveGumroadPurchase(result, GUMROAD_PRODUCT_ID)) {
-      void track("pro_activation_error", "inactive");
-      throw new Error("This purchase is not active. Check the key or the Gumroad receipt.");
-    }
-
-    storageSet(PRO_STORAGE_KEY, "true");
-    setProUnlocked(true);
-    void track("pro_activation_success");
   };
 
   const saveCaseToHistory = (item: Analysis) => {
@@ -1690,7 +2047,7 @@ export default function Home() {
       throw new Error("This browser could not save the case locally.");
     }
     setHistory(next);
-    void track("pro_case_saved");
+    void track("case_saved");
   };
 
   return (
@@ -1699,29 +2056,33 @@ export default function Home() {
         <Report
           analysis={analysis}
           onReset={reset}
-          proUnlocked={proUnlocked}
-          onOpenPro={() => setProOpen(true)}
+          onOpenHistory={() => setHistoryOpen(true)}
           onSaveCase={saveCaseToHistory}
+        />
+      ) : view === "comparison" && comparison ? (
+        <ComparisonReport
+          comparison={comparison}
+          onReset={reset}
+          onOpenHistory={() => setHistoryOpen(true)}
         />
       ) : (
         <Landing
           busy={busy}
           busyMessage={busyMessage}
           error={error}
+          comparisonIntent={comparisonIntent}
           onFile={handleFile}
+          onCompare={handleCompare}
           onDemo={handleDemo}
           onCancel={cancelAnalysis}
-          maxFileBytes={proUnlocked ? SUPPORTER_MAX_FILE_BYTES : FREE_MAX_FILE_BYTES}
-          proUnlocked={proUnlocked}
-          onOpenPro={() => setProOpen(true)}
+          maxFileBytes={MAX_FILE_BYTES}
+          onOpenHistory={() => setHistoryOpen(true)}
         />
       )}
-      <ProModal
-        open={proOpen}
-        unlocked={proUnlocked}
+      <HistoryModal
+        open={historyOpen}
         history={history}
-        onClose={() => setProOpen(false)}
-        onUnlock={unlockPro}
+        onClose={() => setHistoryOpen(false)}
       />
     </>
   );

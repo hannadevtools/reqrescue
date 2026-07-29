@@ -8,12 +8,38 @@ test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => console.error(`Browser page error: ${error.message}`));
 });
 
-async function openApp(page: Page) {
-  await page.goto("/");
+async function openApp(page: Page, path = "/") {
+  await page.goto(path);
   await page.waitForFunction(
     () => document.documentElement.dataset.reqrescueReady === "true",
   );
 }
+
+test("opens a focused comparison journey from the campaign deep link", async ({
+  page,
+}) => {
+  const events: Array<{ event?: string; detail?: string }> = [];
+  await page.route("**/api/event", async (route) => {
+    events.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
+  await openApp(
+    page,
+    "/?mode=compare&utm_source=github&utm_medium=issue_help&utm_campaign=compare",
+  );
+
+  await expect(page.getByRole("heading", { name: /Two HARs/i })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Choose baseline + changed HAR" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Compare two HARs (A/B)" }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/baseline first, changed or broken/i)).toBeVisible();
+  await expect
+    .poll(() => events.find((event) => event.event === "page_view")?.detail)
+    .toBe("github/issue_help/compare");
+});
 
 test("runs the synthetic demo and exposes only evidence-based results", async ({
   page,
@@ -46,12 +72,20 @@ test("runs the synthetic demo and exposes only evidence-based results", async ({
 test("accepts a HAR file, previews sanitized data, and exports safe files", async ({
   page,
 }) => {
+  const events: Array<{ event?: string; detail?: string }> = [];
+  await page.route("**/api/event", async (route) => {
+    events.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
   await openApp(page);
-  await page.locator('input[type="file"]').setInputFiles("tests/fixtures/qa-sample.har");
+  await page.locator('input[type="file"]').first().setInputFiles("tests/fixtures/qa-sample.har");
 
   await expect(
     page.getByRole("heading", { name: /Network failure: 403/i }),
   ).toBeVisible();
+  await expect
+    .poll(() => events.map((event) => event.event))
+    .toEqual(expect.arrayContaining(["analysis_started", "analysis_complete"]));
   await page.getByText("Preview sanitized data").click();
   await expect(page.locator(".sanitized-preview pre")).toContainText("[REDACTED");
 
@@ -72,6 +106,60 @@ test("accepts a HAR file, previews sanitized data, and exports safe files", asyn
     "[ReqRescue](https://app.reqrescue.workers.dev)",
   );
   expect(reportText).toContain("0 HAR bytes uploaded");
+});
+
+test("accepts a BOM-prefixed HAR and surfaces only bounded JSON error clues", async ({
+  page,
+}) => {
+  const responseBody = JSON.stringify({
+    code: 2105,
+    description:
+      'DEPENDENCY=ONEVET, DOWNSTREAMSTATUSCODE=400, RESPONSEBODY={"MODELSTATE":{"BusinessProfile.Address.City":["PRIVATE RAW MESSAGE"]}}',
+    customerEmail: "private-person@example.com",
+  });
+  const capture = {
+    log: {
+      version: "1.2",
+      entries: [
+        {
+          startedDateTime: "2026-07-29T08:00:00.000Z",
+          time: 10_067,
+          request: {
+            method: "POST",
+            url: "https://partner.example.com/enroll?session=private-value",
+            headers: [],
+          },
+          response: {
+            status: 400,
+            headers: [],
+            content: {
+              mimeType: "application/json",
+              size: responseBody.length,
+              text: responseBody,
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  await openApp(page);
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: "partner.har",
+    mimeType: "application/json",
+    buffer: Buffer.from(`\uFEFF${JSON.stringify(capture)}`),
+  });
+
+  const clueCard = page.locator(".report-card").filter({
+    has: page.getByRole("heading", { name: "Safe error clues" }),
+  });
+  await expect(clueCard).toBeVisible();
+  await expect(
+    clueCard.getByText("Validation field: BusinessProfile.Address.City"),
+  ).toBeVisible();
+  await expect(clueCard.getByText("Dependency: ONEVET")).toBeVisible();
+  await expect(page.getByText("PRIVATE RAW MESSAGE")).toHaveCount(0);
+  await expect(page.getByText("private-person@example.com")).toHaveCount(0);
 });
 
 test("keeps adversarial values out of the report and sanitized preview", async ({
@@ -104,7 +192,7 @@ test("keeps adversarial values out of the report and sanitized preview", async (
   };
 
   await openApp(page);
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.locator('input[type="file"]').first().setInputFiles({
     name: `capture-${secret}.har`,
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(trace)),
@@ -118,11 +206,72 @@ test("keeps adversarial values out of the report and sanitized preview", async (
   await expect(page.locator(".sanitized-preview pre")).toContainText("[REDACTED_BODY]");
 });
 
+test("compares two HARs locally and surfaces the first structural difference", async ({
+  page,
+}) => {
+  const capture = (url: string, status: number) => ({
+    log: {
+      version: "1.2",
+      entries: [
+        {
+          startedDateTime: "2026-07-29T08:00:00.000Z",
+          time: 120,
+          request: { method: "POST", url, headers: [] },
+          response: {
+            status,
+            statusText: status >= 400 ? "Bad Request" : "OK",
+            headers: [],
+            content: { size: 12, mimeType: "application/json" },
+            bodySize: 12,
+          },
+          timings: { wait: 120 },
+        },
+      ],
+    },
+  });
+
+  await openApp(page);
+  await page.locator('input[type="file"]').nth(1).setInputFiles([
+    {
+      name: "working.har",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify(
+          capture(
+            "https://uploads.example.test/singleFileUpload?tk=one&ref=signed&uuid=abc",
+            200,
+          ),
+        ),
+      ),
+    },
+    {
+      name: "broken.har",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify(
+          capture(
+            "https://uploads.example.test/singleFileUpload?tk=two&uuid=abc",
+            400,
+          ),
+        ),
+      ),
+    },
+  ]);
+
+  await expect(
+    page.getByRole("heading", { name: /ref.*disappears/i }).first(),
+  ).toBeVisible();
+  await expect(page.getByText("A · BASELINE")).toBeVisible();
+  await expect(page.getByText("B · CHANGED")).toBeVisible();
+  await expect(page.getByText(/0 HAR bytes uploaded/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy comparison" })).toBeVisible();
+});
+
 test("shows controlled errors and lets the same file be selected again", async ({
   page,
 }) => {
   await openApp(page);
-  const input = page.locator('input[type="file"]');
+  const input = page.locator('input[type="file"]').first();
   const invalid = {
     name: "broken.har",
     mimeType: "application/json",
@@ -138,9 +287,9 @@ test("shows controlled errors and lets the same file be selected again", async (
   );
 });
 
-test("traps and restores focus in the honorware dialog", async ({ page }) => {
+test("traps and restores focus in the local history dialog", async ({ page }) => {
   await openApp(page);
-  const opener = page.getByRole("button", { name: "Support · $12" });
+  const opener = page.getByRole("button", { name: "Saved cases" });
   await opener.click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("button", { name: "Close" })).toBeFocused();

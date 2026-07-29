@@ -54,8 +54,7 @@ export type HarFile = {
 };
 
 export const MAX_HAR_ENTRIES = 50_000;
-export const FREE_MAX_FILE_BYTES = 25 * 1024 * 1024;
-export const SUPPORTER_MAX_FILE_BYTES = 75 * 1024 * 1024;
+export const MAX_HAR_FILE_BYTES = 75 * 1024 * 1024;
 
 export type FindingKind =
   | "authorization"
@@ -98,6 +97,13 @@ export type RequestRow = {
   failure: boolean;
 };
 
+export type DiagnosticClue = {
+  requestId: number;
+  status: number;
+  endpoint: string;
+  clues: string[];
+};
+
 export type Analysis = {
   sourceName: string;
   totalRequests: number;
@@ -113,6 +119,7 @@ export type Analysis = {
   findingCount: number;
   suspects: Suspect[];
   requests: RequestRow[];
+  diagnosticClues: DiagnosticClue[];
   markdown: string;
   aiPrompt: string;
   sanitized: HarFile;
@@ -133,13 +140,34 @@ const BEARER = /\bBearer\s+[a-zA-Z0-9._~+/=-]{8,}\b/gi;
 const BASIC = /\bBasic\s+[a-zA-Z0-9+/=]{8,}\b/gi;
 const COMMON_SECRET =
   /\b(?:sk_live_[a-zA-Z0-9]{12,}|sk_test_[a-zA-Z0-9]{12,}|gh[pousr]_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g;
-const IPV6 = /\b[0-9A-F]{0,4}(?::[0-9A-F]{0,4}){2,7}\b/gi;
+// Match either a full eight-hextet address or a compressed address containing
+// "::". Requiring one of those two valid IPv6 shapes prevents ordinary
+// colon-separated values such as ISO timestamps (10:45:59) from being
+// misclassified and redacted as IP addresses.
+const IPV6 =
+  /(?<![0-9A-F:])(?:(?:[0-9A-F]{1,4}:){7}[0-9A-F]{1,4}|(?:[0-9A-F]{0,4}:){1,7}:[0-9A-F]{0,4})(?![0-9A-F:])/gi;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HIGH_ENTROPY_SEGMENT = /^[a-z0-9_-]{24,}$/i;
 const PRIVATE_HOST =
   /^(?:localhost|::1|\[::1\]|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|169\.254(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|\[?(?:fc[0-9a-f]{2}|fd[0-9a-f]{2}|fe80):[0-9a-f:%.]+\]?|[^.]+\.local)$/i;
 const SAFE_HEADER_VALUE =
   /^(?:accept|accept-encoding|age|cache-control|connection|content-encoding|content-language|content-length|content-type|expires|pragma|transfer-encoding|vary)$/i;
+const DIAGNOSTIC_CODE_KEY = /^(?:code|errorCode|error_code|statusCode)$/i;
+const DIAGNOSTIC_IDENTIFIER_KEY =
+  /^(?:error|errorName|error_name|type|resourceProvider|provider)$/i;
+const DIAGNOSTIC_RETRY_KEY = /^(?:isRetryable|retryable)$/i;
+const VALIDATION_CONTAINER_KEY =
+  /^(?:errors?|modelState|validation(?:Errors?)?|violations?|fieldErrors?|issues?)$/i;
+const SAFE_DIAGNOSTIC_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.:/-]{0,79}$/;
+const SAFE_ERROR_CODE =
+  /^(?:BadRequest|Unauthorized|Forbidden|NotFound|Conflict|TooManyRequests|Validation(?:Failed|Error)|InternalServerError|ServiceUnavailable|[A-Z][A-Z0-9_]{2,40}|[A-Za-z]+(?:Error|Exception))$/;
+const SAFE_VALIDATION_FIELD = /^[A-Za-z][A-Za-z0-9_.[\]-]{0,119}$/;
+const SAFE_VALIDATION_SEGMENT =
+  /^(?:account|address|addressline\d*|attributes?|business|businessprofile|city|company|contact|country|data|email|field|firstname|form|input|language|lastname|locale|metadata|name|organization|password|payload|phone|phonenumber|postalcode|profile|province|request|shippingaddress|state|user|userprofile|zip|zipcode|\d{1,3})$/i;
+const MAX_DIAGNOSTIC_BODY_CHARS = 256 * 1024;
+const MAX_DIAGNOSTIC_NODES = 250;
+const MAX_DIAGNOSTIC_CANDIDATES = 24;
+const MAX_DIAGNOSTIC_CLUES_PER_REQUEST = 8;
 
 const FAILURE_EXPLANATIONS: Record<number, string> = {
   400: "The server rejected the request shape or payload.",
@@ -562,6 +590,206 @@ export function sanitizeHar(har: HarFile): HarFile {
   };
 }
 
+function safeDiagnosticIdentifier(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const next = safeShortText(value, 80);
+  if (
+    !next ||
+    !SAFE_DIAGNOSTIC_IDENTIFIER.test(next) ||
+    UUID.test(next) ||
+    HIGH_ENTROPY_SEGMENT.test(next)
+  ) {
+    return null;
+  }
+  return next;
+}
+
+function safeDiagnosticCode(value: unknown): string | null {
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 9_999_999_999
+  ) {
+    return String(value);
+  }
+  if (typeof value !== "string") return null;
+  const next = safeShortText(value, 80);
+  return SAFE_ERROR_CODE.test(next) ? next : null;
+}
+
+function safeValidationField(value: string): string | null {
+  const next = safeShortText(value, 120);
+  const segments = next
+    .replace(/\[(\d{1,3})\]/g, ".$1")
+    .split(".")
+    .filter(Boolean)
+    .map((segment) => segment.replace(/[-_]/g, ""));
+  if (
+    !SAFE_VALIDATION_FIELD.test(next) ||
+    !segments.length ||
+    !segments.every((segment) => SAFE_VALIDATION_SEGMENT.test(segment)) ||
+    UUID.test(next) ||
+    HIGH_ENTROPY_SEGMENT.test(next)
+  ) {
+    return null;
+  }
+  return next;
+}
+
+function extractDiagnosticClues(entries: HarEntry[]): DiagnosticClue[] {
+  const results: DiagnosticClue[] = [];
+
+  entries.forEach((entry, index) => {
+    const status = asNumber(entry.response?.status);
+    const content = entry.response?.content;
+    const text = content?.text;
+    if (
+      status < 400 ||
+      !text ||
+      content?.encoding?.toLowerCase() === "base64" ||
+      text.length > MAX_DIAGNOSTIC_BODY_CHARS
+    ) {
+      return;
+    }
+
+    const mimeType = content?.mimeType?.toLowerCase() ?? "";
+    const trimmedText = text.trimStart();
+    if (
+      !mimeType.includes("json") &&
+      !trimmedText.startsWith("{") &&
+      !trimmedText.startsWith("[")
+    ) {
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return;
+    }
+
+    const clues = new Set<string>();
+    let nodesVisited = 0;
+    const add = (value: string | null) => {
+      if (value && clues.size < MAX_DIAGNOSTIC_CANDIDATES) clues.add(value);
+    };
+    const inspectEmbeddedMetadata = (value: string) => {
+      const embeddedCode = value.match(
+        /"(?:code|errorCode|error_code)"\s*:\s*(\d{3,10})\b/i,
+      )?.[1];
+      if (embeddedCode) add(`Error code: ${embeddedCode}`);
+
+      const dependency = value.match(/\bDEPENDENCY=([A-Z][A-Z0-9_.-]{0,39})\b/i)?.[1];
+      if (dependency) add(`Dependency: ${safeShortText(dependency, 40)}`);
+
+      const downstreamStatus = value.match(/\bDOWNSTREAMSTATUSCODE=(\d{3})\b/i)?.[1];
+      if (downstreamStatus) add(`Downstream HTTP ${downstreamStatus}`);
+
+      const fieldPattern =
+        /\\?"([A-Za-z][A-Za-z0-9_.[\]-]{0,119})\\?"\s*:\s*\[/g;
+      for (const match of value.matchAll(fieldPattern)) {
+        const field = safeValidationField(match[1]);
+        add(field ? `Validation field: ${field}` : null);
+        if (clues.size >= MAX_DIAGNOSTIC_CANDIDATES) break;
+      }
+    };
+    const visit = (
+      value: unknown,
+      key = "",
+      insideValidation = false,
+      depth = 0,
+    ): void => {
+      if (
+        depth > 7 ||
+        nodesVisited >= MAX_DIAGNOSTIC_NODES ||
+        clues.size >= MAX_DIAGNOSTIC_CANDIDATES
+      ) {
+        return;
+      }
+      nodesVisited += 1;
+
+      if (typeof value === "string") {
+        inspectEmbeddedMetadata(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.slice(0, 20).forEach((item) => visit(item, key, insideValidation, depth + 1));
+        return;
+      }
+      if (!isRecord(value)) return;
+
+      for (const [childKey, childValue] of Object.entries(value)) {
+        const childInsideValidation =
+          insideValidation || VALIDATION_CONTAINER_KEY.test(childKey);
+        if (
+          insideValidation &&
+          !VALIDATION_CONTAINER_KEY.test(childKey) &&
+          !DIAGNOSTIC_CODE_KEY.test(childKey) &&
+          !DIAGNOSTIC_IDENTIFIER_KEY.test(childKey) &&
+          !DIAGNOSTIC_RETRY_KEY.test(childKey)
+        ) {
+          const field = safeValidationField(childKey);
+          if (field) add(`Validation field: ${field}`);
+        }
+
+        if (DIAGNOSTIC_CODE_KEY.test(childKey)) {
+          const code = safeDiagnosticCode(childValue);
+          if (code) add(`Error code: ${code}`);
+        } else if (DIAGNOSTIC_IDENTIFIER_KEY.test(childKey)) {
+          const identifier = safeDiagnosticIdentifier(childValue);
+          if (identifier) add(`${safeShortText(childKey, 40)}: ${identifier}`);
+        } else if (
+          DIAGNOSTIC_RETRY_KEY.test(childKey) &&
+          typeof childValue === "boolean"
+        ) {
+          add(`Retryable: ${childValue ? "yes" : "no"}`);
+        }
+
+        if (typeof childValue === "string") inspectEmbeddedMetadata(childValue);
+        visit(childValue, childKey, childInsideValidation, depth + 1);
+        if (clues.size >= MAX_DIAGNOSTIC_CANDIDATES) break;
+      }
+    };
+
+    visit(parsed);
+    if (!clues.size) return;
+
+    const redacted = redactUrl(entry.request?.url);
+    const url = redacted ? safeUrl(redacted) : null;
+    const method =
+      safeShortText(entry.request?.method ?? "GET", 16)
+        .toUpperCase()
+        .replace(/[^A-Z]/g, "") || "GET";
+    const endpoint = url
+      ? `${method} ${url.hostname}${url.pathname}`
+      : `${method} unknown-host/`;
+    results.push({
+      requestId: index + 1,
+      status,
+      endpoint,
+      clues: [...clues]
+        .sort((a, b) => {
+          const priority = (value: string) => {
+            if (value.startsWith("Validation field:")) return 100;
+            if (value.startsWith("Dependency:")) return 90;
+            if (value.startsWith("Downstream HTTP")) return 85;
+            if (/^Error code: \d+$/.test(value)) return 80;
+            if (/provider:/i.test(value)) return 75;
+            if (value.startsWith("Retryable:")) return 70;
+            if (value.startsWith("Error code:")) return 65;
+            return 60;
+          };
+          return priority(b) - priority(a) || a.localeCompare(b);
+        })
+        .slice(0, MAX_DIAGNOSTIC_CLUES_PER_REQUEST),
+    });
+  });
+
+  return results;
+}
+
 function toRequestRows(entries: HarEntry[]): RequestRow[] {
   return entries.map((entry, index) => {
     const url = safeUrl(entry.request?.url ?? "");
@@ -602,14 +830,102 @@ function normalizedEndpointPath(path: string): string {
     .join("/");
 }
 
-function buildSuspects(rows: RequestRow[]): Suspect[] {
+function pathWithoutQuery(row: RequestRow): string {
+  return row.path.split("?")[0];
+}
+
+function isAuthCallback(row: RequestRow): boolean {
+  return /(?:^|\/)(?:auth|oauth|login|signin|sign-in)(?:\/[^/]+)*\/callback(?:\/|$)/i.test(
+    pathWithoutQuery(row),
+  );
+}
+
+function isLoginEntry(row: RequestRow): boolean {
+  const path = pathWithoutQuery(row);
+  return (
+    !isAuthCallback(row) &&
+    /(?:^|\/)(?:auth\/)?(?:login|signin|sign-in)(?:\/|$)/i.test(path)
+  );
+}
+
+function isTelemetryEndpoint(row: RequestRow): boolean {
+  return (
+    /(?:^|\.)(?:sentry\.io|google-analytics\.com|googletagmanager\.com|segment\.io|amplitude\.com|mixpanel\.com|posthog\.com|adrsbl\.io|safary\.club|doubleclick\.net)$/i.test(
+      row.host,
+    ) ||
+    /(?:^|\/)(?:g\/collect|collect|pagead|ccm\/collect|conversions?)(?:\/|$)/i.test(
+      pathWithoutQuery(row),
+    )
+  );
+}
+
+function buildSuspects(
+  rows: RequestRow[],
+  diagnosticClues: DiagnosticClue[],
+): Suspect[] {
   const suspects: Array<Omit<Suspect, "rank"> & { score: number }> = [];
   const failures = rows.filter((row) => row.failure);
   const correlatedAuthRequestIds = new Set<number>();
+  const diagnosticByRequest = new Map(
+    diagnosticClues.map((item) => [item.requestId, item.clues]),
+  );
+
+  const successfulAuthCallbacks = rows.filter(
+    (row) =>
+      !row.failure &&
+      row.method !== "OPTIONS" &&
+      row.status >= 200 &&
+      row.status < 300 &&
+      isAuthCallback(row),
+  );
+  const callbackToLoginPairs = successfulAuthCallbacks.flatMap((callback) => {
+    const callbackTime = Date.parse(callback.startedAt);
+    const nextLogin = rows.find((candidate) => {
+      if (candidate.id <= callback.id || candidate.failure || !isLoginEntry(candidate)) {
+        return false;
+      }
+      const loginTime = Date.parse(candidate.startedAt);
+      return (
+        Number.isFinite(callbackTime) &&
+        Number.isFinite(loginTime) &&
+        loginTime >= callbackTime &&
+        loginTime - callbackTime <= 120_000
+      );
+    });
+    return nextLogin ? [{ callback, nextLogin }] : [];
+  });
+
+  if (callbackToLoginPairs.length) {
+    suspects.push({
+      score: 98,
+      confidence: callbackToLoginPairs.length >= 2 ? "high" : "medium",
+      title: "Login state was not retained after a successful callback",
+      explanation:
+        "The authentication callback succeeded, but the capture returned to a login route shortly afterward. This pattern points to session persistence, account restoration, or the post-login handoff rather than rejected credentials.",
+      nextStep:
+        "Compare cookie and local/session-storage state immediately before navigation, then instrument callback success, account restoration, and the destination page's logged-in-state decision as separate events.",
+      evidence: [
+        `${callbackToLoginPairs.length} successful auth callback${callbackToLoginPairs.length === 1 ? "" : "s"} followed by a login-page revisit`,
+        `Sequence: ${callbackToLoginPairs
+          .slice(0, 3)
+          .map(
+            ({ callback, nextLogin }) =>
+              `${callback.status} ${pathWithoutQuery(callback)} → ${nextLogin.status} ${pathWithoutQuery(nextLogin)}`,
+          )
+          .join(" | ")}`,
+        `Revisit delay${callbackToLoginPairs.length === 1 ? "" : "s"}: ${callbackToLoginPairs
+          .slice(0, 3)
+          .map(({ callback, nextLogin }) =>
+            formatDuration(Date.parse(nextLogin.startedAt) - Date.parse(callback.startedAt)),
+          )
+          .join(", ")}`,
+      ],
+    });
+  }
 
   const groupedFailures = new Map<string, RequestRow[]>();
   for (const row of failures) {
-    const key = `${row.status}:${row.host}:${normalizedEndpointPath(row.path)}`;
+    const key = `${row.status}:${row.method}:${row.host}:${normalizedEndpointPath(row.path)}`;
     groupedFailures.set(key, [...(groupedFailures.get(key) ?? []), row]);
   }
 
@@ -626,6 +942,9 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     group.forEach((row) => correlatedAuthRequestIds.add(row.id));
     const ordered = [...group].sort((a, b) => a.id - b.id);
     const status = ordered[0].status;
+    const safeErrorClues = [
+      ...new Set(group.flatMap((row) => diagnosticByRequest.get(row.id) ?? [])),
+    ].slice(0, 4);
     suspects.push({
       score: 88 + Math.min(8, group.length - 2),
       confidence: group.length >= 3 ? "high" : "medium",
@@ -643,6 +962,7 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
           .map((row) => `${row.method} ${row.path.split("?")[0]}`)
           .join(" → ")}`,
         `HTTP ${status}`,
+        ...safeErrorClues,
       ],
     });
   }
@@ -651,15 +971,45 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     if (group.every((row) => correlatedAuthRequestIds.has(row.id))) continue;
     const sample = group[0];
     const status = sample.status;
-    const explanation =
+    const lastFailureId = Math.max(...group.map((row) => row.id));
+    const normalizedPath = normalizedEndpointPath(sample.path);
+    const laterSuccess = rows.find(
+      (row) =>
+        row.id > lastFailureId &&
+        !row.failure &&
+        row.method === sample.method &&
+        row.host === sample.host &&
+        normalizedEndpointPath(row.path) === normalizedPath,
+    );
+    const fallbackSuccess = rows.find(
+      (row) =>
+        !row.failure &&
+        row.method === sample.method &&
+        row.host !== sample.host &&
+        normalizedEndpointPath(row.path) === normalizedPath,
+    );
+    const telemetry = group.every(isTelemetryEndpoint);
+    const safeErrorClues = [
+      ...new Set(group.flatMap((row) => diagnosticByRequest.get(row.id) ?? [])),
+    ].slice(0, 4);
+    const baseExplanation =
       status === 0
         ? "The browser recorded no HTTP response. Common causes are CORS, DNS, TLS, an aborted request, an extension, or lost connectivity."
         : FAILURE_EXPLANATIONS[status] ??
           (status >= 500
             ? "The request reached the service and failed on the server side."
             : "The request completed with an unsuccessful HTTP status.");
+    const explanation = laterSuccess
+      ? `${baseExplanation} The same endpoint succeeded later in this capture, so treat this as a recovered retry unless its timing matches the user-visible failure.`
+      : fallbackSuccess
+        ? `${baseExplanation} Another host serving the same normalized endpoint succeeded, which suggests fallback or partial backend availability rather than a total flow failure.`
+        : telemetry
+          ? `${baseExplanation} This is a telemetry or analytics endpoint, so it is unlikely to be the root cause of the product flow.`
+          : baseExplanation;
     const confidence: Suspect["confidence"] =
-      group.length >= 3
+      laterSuccess || fallbackSuccess || telemetry
+        ? "low"
+        : group.length >= 3
         ? "high"
         : group.length >= 2 || status >= 500 || status === 401 || status === 403
           ? "medium"
@@ -672,15 +1022,28 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     suspects.push({
       score:
         (status >= 500 ? 84 : status === 401 || status === 403 ? 80 : status === 0 ? 74 : 68) +
-        Math.min(9, group.length - 1),
+        Math.min(9, group.length - 1) -
+        (laterSuccess ? 38 : 0) -
+        (fallbackSuccess ? 25 : 0) -
+        (telemetry ? 40 : 0),
       confidence,
-      title: `${status || "Network"} failure at ${endpointLabel(sample)}`,
+      title: `${laterSuccess ? "Recovered " : ""}${status || "Network"} failure at ${endpointLabel(sample)}`,
       explanation,
-      nextStep,
+      nextStep: laterSuccess
+        ? "Compare the failed attempt with the later successful request and investigate it only if the retry delay or intermediate state matches the reported symptom."
+        : nextStep,
       evidence: [
         `${group.length} matching failed request${group.length === 1 ? "" : "s"}`,
         status ? `HTTP ${status}` : "No HTTP status returned",
+        ...(laterSuccess
+          ? [`Later recovered with HTTP ${laterSuccess.status} at the same endpoint`]
+          : fallbackSuccess
+            ? [`Fallback host ${fallbackSuccess.host} returned HTTP ${fallbackSuccess.status}`]
+            : telemetry
+              ? ["Telemetry/analytics endpoint"]
+              : []),
         `${formatDuration(sample.duration)} observed duration`,
+        ...safeErrorClues,
       ],
     });
   }
@@ -695,7 +1058,7 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
   const successfulP95 = percentile(successfulDurations, 0.95);
   const slowThreshold = Math.max(1000, successfulP95, medianDuration * 3);
   const slow = rows
-    .filter((row) => !row.failure && row.duration >= slowThreshold)
+    .filter((row) => !row.failure && row.status !== 101 && row.duration >= slowThreshold)
     .sort((a, b) => b.duration - a.duration)
     .slice(0, 2);
   for (const row of slow) {
@@ -716,11 +1079,11 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
   }
 
   const redirectsByHost = new Map<string, RequestRow[]>();
-  for (const row of rows.filter((item) => item.status >= 300 && item.status < 400)) {
+  for (const row of rows.filter((item) => item.status >= 300 && item.status < 400 && item.status !== 304)) {
     redirectsByHost.set(row.host, [...(redirectsByHost.get(row.host) ?? []), row]);
   }
   for (const [host, group] of redirectsByHost) {
-    if (group.length >= 3) {
+    if (group.length >= 3 && !group.every(isTelemetryEndpoint)) {
       suspects.push({
         score: 62 + Math.min(group.length, 10),
         confidence: "medium",
@@ -785,6 +1148,7 @@ function buildReport(
   har: HarFile,
   rows: RequestRow[],
   suspects: Suspect[],
+  diagnosticClues: DiagnosticClue[],
   findings: Finding[],
   metrics: {
     totalBytes: number;
@@ -794,9 +1158,9 @@ function buildReport(
   },
 ): { title: string; markdown: string; aiPrompt: string } {
   const failures = rows.filter((row) => row.failure);
-  const firstFailure = failures[0];
-  const title = firstFailure
-    ? `Network failure: ${firstFailure.status || "no response"} at ${endpointLabel(firstFailure)}`
+  const primarySuspect = suspects[0];
+  const title = failures.length && primarySuspect
+    ? `Network failure: ${primarySuspect.title}`
     : `Network trace review: ${rows.length} requests, no HTTP failure`;
   const browser = har.log.browser
     ? `${har.log.browser.name ?? "Unknown"} ${har.log.browser.version ?? ""}`.trim()
@@ -815,6 +1179,12 @@ function buildReport(
           `${row.host}${row.path.split("?")[0]}`,
         )}\` | ${formatDuration(row.duration)} |`,
     );
+  const safeErrorEvidence = diagnosticClues.map(
+    (item) =>
+      `- ${markdownCode(item.endpoint)} — HTTP ${item.status}: ${item.clues
+        .map(markdownCode)
+        .join("; ")}`,
+  );
 
   const markdown = `# ${title}
 
@@ -849,6 +1219,12 @@ ${suspect.evidence.map((item) => `- ${item}`).join("\n")}`,
 |---|---:|---|---:|
 ${topEvidence.length ? topEvidence.join("\n") : "| — | — | No HTTP failures captured | — |"}
 
+## Safely extracted error clues
+
+${safeErrorEvidence.length ? safeErrorEvidence.join("\n") : "No bounded JSON error metadata was extracted."}
+
+Only short error identifiers, retryability flags, dependency names, downstream statuses, and validation field paths are retained here. The original request and response bodies remain stripped.
+
 ## Capture context
 
 - Source: ${markdownCode(sourceName)}
@@ -867,7 +1243,7 @@ ${topEvidence.length ? topEvidence.join("\n") : "| — | — | No HTTP failures 
 
 ## Privacy
 
-Generated locally by ReqRescue from the same sanitized evidence model used by the export and preview. Request and response bodies are stripped by default. Review the output before sharing because no automated process can identify every domain-specific identifier.
+Generated locally by ReqRescue from the same sanitized evidence model used by the export and preview. Request and response bodies are stripped by default; only the bounded error metadata described above may be retained in the report. Review the output before sharing because no automated process can identify every domain-specific identifier.
 
 ---
 
@@ -937,7 +1313,8 @@ function validateEntry(entry: unknown, index: number): void {
 export function parseHar(text: string): HarFile {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    const normalized = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+    parsed = JSON.parse(normalized);
   } catch {
     throw new Error("This file is not valid JSON.");
   }
@@ -962,6 +1339,7 @@ export function parseHar(text: string): HarFile {
 
 export function analyzeHar(har: HarFile, sourceName: string): Analysis {
   const findings = collectFindings(har);
+  const diagnosticClues = extractDiagnosticClues(har.log.entries);
   const sanitized = sanitizeHar(har);
   const rows = toRequestRows(sanitized.log.entries);
   const durations = rows.map((row) => row.duration);
@@ -979,17 +1357,25 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
       ? Math.max(0, latestEnd - earliestStart)
       : durations.reduce((sum, value) => sum + value, 0);
   const p95Duration = percentile(durations, 0.95);
-  const suspects = buildSuspects(rows);
+  const suspects = buildSuspects(rows, diagnosticClues);
   const totalBytes = rows.reduce((sum, row) => sum + row.size, 0);
   const domainCount = new Set(rows.map((row) => row.host)).size;
   const findingCount = findings.reduce((sum, finding) => sum + finding.count, 0);
   const safeSourceName = sanitizeSourceName(sourceName);
-  const report = buildReport(safeSourceName, sanitized, rows, suspects, findings, {
-    totalBytes,
-    totalDuration,
-    p95Duration,
-    domainCount,
-  });
+  const report = buildReport(
+    safeSourceName,
+    sanitized,
+    rows,
+    suspects,
+    diagnosticClues,
+    findings,
+    {
+      totalBytes,
+      totalDuration,
+      p95Duration,
+      domainCount,
+    },
+  );
   const criticalCount = findings
     .filter((item) => item.severity === "critical")
     .reduce((sum, item) => sum + item.count, 0);
@@ -1004,7 +1390,7 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
     failedRequests: rows.filter((row) => row.failure).length,
     clientErrors: rows.filter((row) => row.status >= 400 && row.status < 500).length,
     serverErrors: rows.filter((row) => row.status >= 500).length,
-    redirects: rows.filter((row) => row.status >= 300 && row.status < 400).length,
+    redirects: rows.filter((row) => row.status >= 300 && row.status < 400 && row.status !== 304).length,
     totalBytes,
     totalDuration,
     p95Duration,
@@ -1013,6 +1399,7 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
     findingCount,
     suspects,
     requests: rows,
+    diagnosticClues,
     markdown: report.markdown,
     aiPrompt: report.aiPrompt,
     sanitized,

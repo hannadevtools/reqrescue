@@ -23,9 +23,9 @@ test("accepts an allowlisted same-origin event", async () => {
     const response = await POST(
       request(
         JSON.stringify({
-          event: "analysis_cancelled",
+          event: "analysis_started",
           session: "test-session",
-          detail: "local",
+          detail: "file",
         }),
       ),
     );

@@ -20,7 +20,7 @@ interface ExecutionContext {
 
 const SECURITY_HEADERS = {
   "content-security-policy":
-    "default-src 'self'; base-uri 'self'; connect-src 'self' https://api.gumroad.com; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://app.reqrescue.workers.dev; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:",
+    "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https://app.reqrescue.workers.dev; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:",
   "cross-origin-opener-policy": "same-origin",
   "permissions-policy":
     "camera=(), geolocation=(), microphone=(), payment=(), usb=()",

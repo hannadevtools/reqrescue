@@ -27,10 +27,10 @@ export default function TermsPage() {
 
         <h2>Service</h2>
         <p>
-          ReqRescue provides deterministic HAR validation, triage, redaction,
-          and report generation. It may identify likely causes from captured
-          network evidence, but application and server logs are often required
-          to establish the actual root cause.
+          ReqRescue provides deterministic HAR validation, triage, A/B
+          comparison, redaction, and report generation. It may identify likely
+          causes from captured network evidence, but application and server
+          logs are often required to establish the actual root cause.
         </p>
 
         <h2>Your responsibilities</h2>
@@ -41,20 +41,19 @@ export default function TermsPage() {
           into the feedback field.
         </p>
 
-        <h2>Honorware support</h2>
+        <h2>Free service and external charities</h2>
         <p>
-          Core analysis, sanitization, clean HAR export, Markdown export, and
-          source code remain free. A voluntary one-time $12 purchase supports
-          the hosted service and unlocks local convenience features. It is not
-          a subscription. Refund requests are handled through Gumroad and are
-          eligible within 30 days of purchase.
+          Analysis, comparison, sanitization, clean HAR export, Markdown
+          export, PDF printing, local case history, and source code are free.
+          ReqRescue does not accept donations. Links to animal charities are
+          optional external links; ReqRescue is not affiliated with those
+          organizations and receives no money from them.
         </p>
 
         <h2>Local data</h2>
         <p>
-          Saved cases and the Supporter unlock live in browser storage. Clearing
-          site data, changing browser profiles, or using private browsing can
-          remove them. Keep your Gumroad receipt if you need to reactivate.
+          Saved cases live in browser storage. Clearing site data, changing
+          browser profiles, or using private browsing can remove them.
         </p>
 
         <h2>No warranty</h2>
@@ -66,7 +65,7 @@ export default function TermsPage() {
           consequential losses arising from its use.
         </p>
 
-        <p className="legal-updated">Last updated: July 27, 2026.</p>
+        <p className="legal-updated">Last updated: July 29, 2026.</p>
       </article>
     </main>
   );

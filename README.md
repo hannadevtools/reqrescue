@@ -3,9 +3,10 @@
 ReqRescue turns a browser HAR into an actionable incident packet:
 
 - ranked failure suspects with confidence and cited evidence;
+- local A/B comparison of two HAR captures;
 - a sanitized HAR with common credentials and PII removed;
 - a Markdown bug report and AI-debugger handoff;
-- an optional print-ready PDF workflow and local case history.
+- a print-ready PDF workflow and local case history.
 
 Try the hosted build: **[app.reqrescue.workers.dev](https://app.reqrescue.workers.dev/)**
 
@@ -35,6 +36,8 @@ HAR parsing, ranking, redaction, and export generation run in the browser:
 
 - [`app/trace-engine.ts`](app/trace-engine.ts) contains the parser, heuristics,
   redaction, and report generation.
+- [`app/trace-compare.ts`](app/trace-compare.ts) compares only sanitized request
+  structure and produces the A/B report.
 - [`app/page.tsx`](app/page.tsx) reads files with the browser `File` API and
   transfers their bytes to a dedicated browser worker. It also renders a small
   preview of the sanitized copy before export.
@@ -43,27 +46,21 @@ HAR parsing, ranking, redaction, and export generation run in the browser:
 
 The hosted build never sends HAR contents, file names, URLs, headers, bodies,
 or generated reports to ReqRescue. It records only an allowlist of pseudonymous
-product events and optional feedback. Gumroad license activation, when used,
-sends only the license key directly to Gumroad.
+product events and optional feedback.
 
 Automated redaction cannot recognize every product-specific secret. Review a
 sanitized export before sharing it.
 
-## Free core and honorware support
+## Free, with no payment to ReqRescue
 
-The analyzer, sanitizer, clean HAR export, Markdown incident report, and source
+The analyzer, A/B comparison, sanitizer, clean HAR export, Markdown incident
+report, PDF printing, 75 MB per-file local limit, on-device history, and source
 code are free under the MIT license.
 
-The hosted build offers voluntary **$12 one-time honorware support** with local
-convenience unlocks:
-
-- print or save the complete incident brief as PDF;
-- analyze local HAR files up to a protected 75 MB limit, subject to device memory;
-- keep up to 10 incident briefs in this browser's local storage.
-
-There is no ReqRescue account and no subscription. Because the source is open,
-the license gate is intentionally lightweight; the purchase supports the hosted
-build and future maintenance.
+ReqRescue has no account, subscription, paywall, license key, or donation
+checkout. The hosted site instead links directly to two independent Israeli
+animal organizations. ReqRescue is not affiliated with them and receives
+nothing.
 
 ## Development
 
@@ -82,8 +79,8 @@ npx tsc --project tsconfig.app.json --noEmit
 ```
 
 Tests cover server rendering, local browser-worker uploads, exports,
-accessibility interactions, deterministic suspect ranking, malformed HARs,
-event API boundaries, honorware license states, and adversarial removal of
+accessibility interactions, deterministic suspect ranking, A/B comparison,
+malformed HARs, event API boundaries, and adversarial removal of
 credentials, bodies, vendor fields, tokens, sessions, passwords, email
 addresses, API keys, private hosts, and IP addresses. In CI, `npm test`
 installs the pinned Playwright Chromium runtime before running browser tests.
