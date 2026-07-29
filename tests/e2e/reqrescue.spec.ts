@@ -8,12 +8,30 @@ test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => console.error(`Browser page error: ${error.message}`));
 });
 
-async function openApp(page: Page) {
-  await page.goto("/");
+async function openApp(page: Page, path = "/") {
+  await page.goto(path);
   await page.waitForFunction(
     () => document.documentElement.dataset.reqrescueReady === "true",
   );
 }
+
+test("opens a focused comparison journey from the campaign deep link", async ({
+  page,
+}) => {
+  await openApp(
+    page,
+    "/?mode=compare&utm_source=github&utm_medium=issue_help&utm_campaign=compare",
+  );
+
+  await expect(page.getByRole("heading", { name: /Two HARs/i })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Choose baseline + changed HAR" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Compare two HARs (A/B)" }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/baseline first, changed or broken/i)).toBeVisible();
+});
 
 test("runs the synthetic demo and exposes only evidence-based results", async ({
   page,

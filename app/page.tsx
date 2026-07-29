@@ -346,6 +346,7 @@ function UploadPanel({
   busy,
   busyMessage,
   error,
+  comparisonIntent,
   onFile,
   onCompare,
   onDemo,
@@ -355,6 +356,7 @@ function UploadPanel({
   busy: boolean;
   busyMessage: string;
   error: string;
+  comparisonIntent: boolean;
   onFile: (file: File) => void;
   onCompare: (files: File[]) => void;
   onDemo: () => void;
@@ -427,16 +429,30 @@ function UploadPanel({
       <h2>
         {busy
           ? busyMessage || "Reading the trace…"
-          : "Drop the browser recording (HAR)."}
+          : comparisonIntent
+            ? "Choose the working HAR and the changed HAR."
+            : "Drop the browser recording (HAR)."}
       </h2>
       <p>
-        Nothing is uploaded. Your browser performs the entire analysis and
-        redaction locally.
+        {comparisonIntent
+          ? "Select both files together—baseline first, changed or broken capture second. The comparison stays in this tab."
+          : "Nothing is uploaded. Your browser performs the entire analysis and redaction locally."}
       </p>
       <div className="upload-actions">
-        <button className="button button-demo" disabled={busy} onClick={onDemo}>
-          Run a 15-second demo — no HAR needed
-        </button>
+        {comparisonIntent && (
+          <button
+            className="button button-demo button-compare"
+            disabled={busy}
+            onClick={() => compareInputRef.current?.click()}
+          >
+            Choose baseline + changed HAR
+          </button>
+        )}
+        {!comparisonIntent && (
+          <button className="button button-demo" disabled={busy} onClick={onDemo}>
+            Run a 15-second demo — no HAR needed
+          </button>
+        )}
         <button
           className="button button-outline"
           disabled={busy}
@@ -450,13 +466,20 @@ function UploadPanel({
             "Choose HAR file"
           )}
         </button>
-        <button
-          className="button button-outline button-compare"
-          disabled={busy}
-          onClick={() => compareInputRef.current?.click()}
-        >
-          Compare two HARs (A/B)
-        </button>
+        {!comparisonIntent && (
+          <button
+            className="button button-outline button-compare"
+            disabled={busy}
+            onClick={() => compareInputRef.current?.click()}
+          >
+            Compare two HARs (A/B)
+          </button>
+        )}
+        {comparisonIntent && (
+          <button className="button button-outline" disabled={busy} onClick={onDemo}>
+            See a single-HAR demo instead
+          </button>
+        )}
         {busy && (
           <button className="button button-quiet" onClick={onCancel}>
             Cancel local analysis
@@ -502,6 +525,7 @@ function Hero({
   busy,
   busyMessage,
   error,
+  comparisonIntent,
   onFile,
   onCompare,
   onDemo,
@@ -511,6 +535,7 @@ function Hero({
   busy: boolean;
   busyMessage: string;
   error: string;
+  comparisonIntent: boolean;
   onFile: (file: File) => void;
   onCompare: (files: File[]) => void;
   onDemo: () => void;
@@ -522,19 +547,30 @@ function Hero({
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">
-            <span>Free browser-error analyzer · 0 bytes uploaded</span>
+            <span>
+              {comparisonIntent
+                ? "Free local HAR regression comparison · 0 bytes uploaded"
+                : "Free browser-error analyzer · 0 bytes uploaded"}
+            </span>
             <i />
           </p>
-          <h1>
-            A website broke.
-            <br />
-            Send <em>evidence, not guesswork.</em>
-          </h1>
+          {comparisonIntent ? (
+            <h1>
+              Two HARs.
+              <br />
+              <em>Find what changed.</em>
+            </h1>
+          ) : (
+            <h1>
+              A website broke.
+              <br />
+              Send <em>evidence, not guesswork.</em>
+            </h1>
+          )}
           <p className="hero-lede">
-            A HAR is the browser&apos;s recording of what happened while a page
-            failed. ReqRescue finds the likely failure points, removes common
-            secrets, and turns that recording into a ready-to-send bug report.
-            The file never leaves this tab.
+            {comparisonIntent
+              ? "Compare a working capture with a changed or broken one. ReqRescue ranks missing query keys, new failures, status transitions, endpoint changes, and latency regressions—without uploading either file."
+              : "A HAR is the browser's recording of what happened while a page failed. ReqRescue finds the likely failure points, removes common secrets, and turns that recording into a ready-to-send bug report. The file never leaves this tab."}
           </p>
           <div className="proof-strip">
             <div>
@@ -542,12 +578,12 @@ function Hero({
               <span>bytes uploaded</span>
             </div>
             <div>
-              <strong>&lt; 10s</strong>
-              <span>to first diagnosis</span>
+              <strong>{comparisonIntent ? "A/B" : "< 10s"}</strong>
+              <span>{comparisonIntent ? "ranked structural diff" : "to first diagnosis"}</span>
             </div>
             <div>
-              <strong>3</strong>
-              <span>export formats</span>
+              <strong>{comparisonIntent ? "2" : "3"}</strong>
+              <span>{comparisonIntent ? "clean HAR exports" : "export formats"}</span>
             </div>
           </div>
         </div>
@@ -555,6 +591,7 @@ function Hero({
           busy={busy}
           busyMessage={busyMessage}
           error={error}
+          comparisonIntent={comparisonIntent}
           onFile={onFile}
           onCompare={onCompare}
           onDemo={onDemo}
@@ -885,6 +922,7 @@ function Landing({
   busy,
   busyMessage,
   error,
+  comparisonIntent,
   onFile,
   onCompare,
   onDemo,
@@ -895,6 +933,7 @@ function Landing({
   busy: boolean;
   busyMessage: string;
   error: string;
+  comparisonIntent: boolean;
   onFile: (file: File) => void;
   onCompare: (files: File[]) => void;
   onDemo: () => void;
@@ -910,6 +949,7 @@ function Landing({
           busy={busy}
           busyMessage={busyMessage}
           error={error}
+          comparisonIntent={comparisonIntent}
           onFile={onFile}
           onCompare={onCompare}
           onDemo={onDemo}
@@ -1719,10 +1759,14 @@ export default function Home() {
   const [error, setError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<StoredCase[]>([]);
+  const [comparisonIntent, setComparisonIntent] = useState(false);
   const activeJobRef = useRef<ActiveJob | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.reqrescueReady = "true";
+    setComparisonIntent(
+      new URLSearchParams(window.location.search).get("mode") === "compare",
+    );
     void track("page_view", acquisitionSource());
     const initialization = window.setTimeout(() => {
       setHistory(loadHistory());
@@ -1981,6 +2025,7 @@ export default function Home() {
           busy={busy}
           busyMessage={busyMessage}
           error={error}
+          comparisonIntent={comparisonIntent}
           onFile={handleFile}
           onCompare={handleCompare}
           onDemo={handleDemo}
