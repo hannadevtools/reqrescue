@@ -1204,10 +1204,45 @@ function Report({
               </div>
             </section>
 
+            {analysis.diagnosticClues.length > 0 && (
+              <section className="report-card suspects-card">
+                <header className="card-header">
+                  <div>
+                    <span className="card-index">02</span>
+                    <h2>Safe error clues</h2>
+                  </div>
+                  <small>Bounded JSON metadata · raw bodies stripped</small>
+                </header>
+                <div className="suspects">
+                  {analysis.diagnosticClues.map((item) => (
+                    <article className="suspect" key={item.requestId}>
+                      <span className="status-pill status-failed">{item.status}</span>
+                      <div>
+                        <div className="suspect-title">
+                          <h3>{item.endpoint}</h3>
+                        </div>
+                        <p>
+                          ReqRescue retained only bounded error identifiers,
+                          dependency names, retryability, and validation field paths.
+                        </p>
+                        <ul>
+                          {item.clues.map((clue) => (
+                            <li key={clue}>{clue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="report-card">
               <header className="card-header request-header">
                 <div>
-                  <span className="card-index">02</span>
+                  <span className="card-index">
+                    {analysis.diagnosticClues.length ? "03" : "02"}
+                  </span>
                   <h2>Request evidence</h2>
                 </div>
                 <div className="filters" aria-label="Filter requests">
@@ -1282,7 +1317,9 @@ function Report({
             <section className="report-card privacy-card">
               <header className="card-header compact">
                 <div>
-                  <span className="card-index">03</span>
+                  <span className="card-index">
+                    {analysis.diagnosticClues.length ? "04" : "03"}
+                  </span>
                   <h2>Privacy sweep</h2>
                 </div>
               </header>
@@ -1330,7 +1367,9 @@ function Report({
             <details className="report-card sanitized-preview">
               <summary>
                 <span>
-                  <i className="card-index">04</i>
+                  <i className="card-index">
+                    {analysis.diagnosticClues.length ? "05" : "04"}
+                  </i>
                   <b>Preview sanitized data</b>
                 </span>
                 <em>Inspect before export</em>
@@ -1351,7 +1390,9 @@ function Report({
             <section className="report-card export-card" id="handoff">
               <header className="card-header compact">
                 <div>
-                  <span className="card-index">05</span>
+                  <span className="card-index">
+                    {analysis.diagnosticClues.length ? "06" : "05"}
+                  </span>
                   <h2>Hand it off</h2>
                 </div>
               </header>

@@ -319,6 +319,14 @@ test("rejects malformed nested HAR structures with controlled messages", () => {
   );
 });
 
+test("accepts a valid HAR with a UTF-8 byte-order mark", () => {
+  const parsed = parseHar(
+    `\uFEFF${JSON.stringify(har([entry("https://example.com/with-bom", 200)]))}`,
+  );
+
+  assert.equal(parsed.log.entries.length, 1);
+});
+
 test("rejects traces above the request-count safety bound", () => {
   const entries = Array.from({ length: 50_001 }, () => ({}));
   assert.throws(
@@ -344,6 +352,69 @@ test("does not double-count a token represented in URL and queryString", () => {
   );
   const token = analysis.findings.find((finding) => finding.kind === "token");
   assert.equal(token?.count, 1);
+});
+
+test("extracts bounded JSON error clues while stripping the original body", () => {
+  const responseBody = JSON.stringify({
+    code: "BadRequest",
+    statusCode: 4_111_111_111_111_111,
+    message: JSON.stringify({
+      code: 2105,
+      description:
+        'DOWNSTREAMSTATUSCODE=400 (BADREQUEST), DEPENDENCY=ONEVET, RESPONSEBODY={"MODELSTATE":{"BusinessProfile.Address.City":["CITY IS REQUIRED."],"User.privatePersonSecret":["PRIVATE"]}}',
+    }),
+    errorName: "BadRequest",
+    isRetryable: false,
+    resourceProvider: "AMSProvider:UpdateAccount",
+    customerEmail: "private-person@example.com",
+    diagnosticToken: "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+  });
+  const failed = entry(
+    "https://partner.example.com/enroll?session=private-session-value",
+    400,
+    10_067,
+  );
+  failed.request = {
+    method: "POST",
+    url: "https://partner.example.com/enroll?session=private-session-value",
+    headers: [],
+    postData: {
+      mimeType: "application/json",
+      text: JSON.stringify({ address: { city: "Private City" } }),
+    },
+  };
+  failed.response = {
+    ...failed.response,
+    content: {
+      size: responseBody.length,
+      mimeType: "application/json",
+      text: responseBody,
+    },
+  };
+
+  const analysis = analyzeHar(har([failed]), "partner-private.har");
+  const output = JSON.stringify({
+    diagnosticClues: analysis.diagnosticClues,
+    markdown: analysis.markdown,
+    suspects: analysis.suspects,
+    sanitized: analysis.sanitized,
+  });
+
+  assert.equal(analysis.diagnosticClues.length, 1);
+  assert.match(output, /Error code: 2105/);
+  assert.match(output, /Dependency: ONEVET/);
+  assert.match(output, /Downstream HTTP 400/);
+  assert.match(output, /Validation field: BusinessProfile\.Address\.City/);
+  assert.match(output, /Retryable: no/);
+  assert.match(output, /resourceProvider: AMSProvider:UpdateAccount/);
+  assert.match(analysis.markdown, /Safely extracted error clues/);
+  assert.match(output, /\[REDACTED_BODY\]/);
+  assert.doesNotMatch(output, /private-person@example\.com/i);
+  assert.doesNotMatch(output, /abcdefghijklmnopqrstuvwxyz1234567890/i);
+  assert.doesNotMatch(output, /4111111111111111/);
+  assert.doesNotMatch(output, /Private City|private-session-value/i);
+  assert.doesNotMatch(output, /privatePersonSecret/i);
+  assert.doesNotMatch(output, /CITY IS REQUIRED/i);
 });
 
 test("uses evidence volume before assigning high confidence", () => {

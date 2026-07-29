@@ -92,6 +92,60 @@ test("accepts a HAR file, previews sanitized data, and exports safe files", asyn
   expect(reportText).toContain("0 HAR bytes uploaded");
 });
 
+test("accepts a BOM-prefixed HAR and surfaces only bounded JSON error clues", async ({
+  page,
+}) => {
+  const responseBody = JSON.stringify({
+    code: 2105,
+    description:
+      'DEPENDENCY=ONEVET, DOWNSTREAMSTATUSCODE=400, RESPONSEBODY={"MODELSTATE":{"BusinessProfile.Address.City":["PRIVATE RAW MESSAGE"]}}',
+    customerEmail: "private-person@example.com",
+  });
+  const capture = {
+    log: {
+      version: "1.2",
+      entries: [
+        {
+          startedDateTime: "2026-07-29T08:00:00.000Z",
+          time: 10_067,
+          request: {
+            method: "POST",
+            url: "https://partner.example.com/enroll?session=private-value",
+            headers: [],
+          },
+          response: {
+            status: 400,
+            headers: [],
+            content: {
+              mimeType: "application/json",
+              size: responseBody.length,
+              text: responseBody,
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  await openApp(page);
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: "partner.har",
+    mimeType: "application/json",
+    buffer: Buffer.from(`\uFEFF${JSON.stringify(capture)}`),
+  });
+
+  const clueCard = page.locator(".report-card").filter({
+    has: page.getByRole("heading", { name: "Safe error clues" }),
+  });
+  await expect(clueCard).toBeVisible();
+  await expect(
+    clueCard.getByText("Validation field: BusinessProfile.Address.City"),
+  ).toBeVisible();
+  await expect(clueCard.getByText("Dependency: ONEVET")).toBeVisible();
+  await expect(page.getByText("PRIVATE RAW MESSAGE")).toHaveCount(0);
+  await expect(page.getByText("private-person@example.com")).toHaveCount(0);
+});
+
 test("keeps adversarial values out of the report and sanitized preview", async ({
   page,
 }) => {

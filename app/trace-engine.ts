@@ -97,6 +97,13 @@ export type RequestRow = {
   failure: boolean;
 };
 
+export type DiagnosticClue = {
+  requestId: number;
+  status: number;
+  endpoint: string;
+  clues: string[];
+};
+
 export type Analysis = {
   sourceName: string;
   totalRequests: number;
@@ -112,6 +119,7 @@ export type Analysis = {
   findingCount: number;
   suspects: Suspect[];
   requests: RequestRow[];
+  diagnosticClues: DiagnosticClue[];
   markdown: string;
   aiPrompt: string;
   sanitized: HarFile;
@@ -144,6 +152,22 @@ const PRIVATE_HOST =
   /^(?:localhost|::1|\[::1\]|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|169\.254(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|\[?(?:fc[0-9a-f]{2}|fd[0-9a-f]{2}|fe80):[0-9a-f:%.]+\]?|[^.]+\.local)$/i;
 const SAFE_HEADER_VALUE =
   /^(?:accept|accept-encoding|age|cache-control|connection|content-encoding|content-language|content-length|content-type|expires|pragma|transfer-encoding|vary)$/i;
+const DIAGNOSTIC_CODE_KEY = /^(?:code|errorCode|error_code|statusCode)$/i;
+const DIAGNOSTIC_IDENTIFIER_KEY =
+  /^(?:error|errorName|error_name|type|resourceProvider|provider)$/i;
+const DIAGNOSTIC_RETRY_KEY = /^(?:isRetryable|retryable)$/i;
+const VALIDATION_CONTAINER_KEY =
+  /^(?:errors?|modelState|validation(?:Errors?)?|violations?|fieldErrors?|issues?)$/i;
+const SAFE_DIAGNOSTIC_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_.:/-]{0,79}$/;
+const SAFE_ERROR_CODE =
+  /^(?:BadRequest|Unauthorized|Forbidden|NotFound|Conflict|TooManyRequests|Validation(?:Failed|Error)|InternalServerError|ServiceUnavailable|[A-Z][A-Z0-9_]{2,40}|[A-Za-z]+(?:Error|Exception))$/;
+const SAFE_VALIDATION_FIELD = /^[A-Za-z][A-Za-z0-9_.[\]-]{0,119}$/;
+const SAFE_VALIDATION_SEGMENT =
+  /^(?:account|address|addressline\d*|attributes?|business|businessprofile|city|company|contact|country|data|email|field|firstname|form|input|language|lastname|locale|metadata|name|organization|password|payload|phone|phonenumber|postalcode|profile|province|request|shippingaddress|state|user|userprofile|zip|zipcode|\d{1,3})$/i;
+const MAX_DIAGNOSTIC_BODY_CHARS = 256 * 1024;
+const MAX_DIAGNOSTIC_NODES = 250;
+const MAX_DIAGNOSTIC_CANDIDATES = 24;
+const MAX_DIAGNOSTIC_CLUES_PER_REQUEST = 8;
 
 const FAILURE_EXPLANATIONS: Record<number, string> = {
   400: "The server rejected the request shape or payload.",
@@ -566,6 +590,206 @@ export function sanitizeHar(har: HarFile): HarFile {
   };
 }
 
+function safeDiagnosticIdentifier(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const next = safeShortText(value, 80);
+  if (
+    !next ||
+    !SAFE_DIAGNOSTIC_IDENTIFIER.test(next) ||
+    UUID.test(next) ||
+    HIGH_ENTROPY_SEGMENT.test(next)
+  ) {
+    return null;
+  }
+  return next;
+}
+
+function safeDiagnosticCode(value: unknown): string | null {
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 9_999_999_999
+  ) {
+    return String(value);
+  }
+  if (typeof value !== "string") return null;
+  const next = safeShortText(value, 80);
+  return SAFE_ERROR_CODE.test(next) ? next : null;
+}
+
+function safeValidationField(value: string): string | null {
+  const next = safeShortText(value, 120);
+  const segments = next
+    .replace(/\[(\d{1,3})\]/g, ".$1")
+    .split(".")
+    .filter(Boolean)
+    .map((segment) => segment.replace(/[-_]/g, ""));
+  if (
+    !SAFE_VALIDATION_FIELD.test(next) ||
+    !segments.length ||
+    !segments.every((segment) => SAFE_VALIDATION_SEGMENT.test(segment)) ||
+    UUID.test(next) ||
+    HIGH_ENTROPY_SEGMENT.test(next)
+  ) {
+    return null;
+  }
+  return next;
+}
+
+function extractDiagnosticClues(entries: HarEntry[]): DiagnosticClue[] {
+  const results: DiagnosticClue[] = [];
+
+  entries.forEach((entry, index) => {
+    const status = asNumber(entry.response?.status);
+    const content = entry.response?.content;
+    const text = content?.text;
+    if (
+      status < 400 ||
+      !text ||
+      content?.encoding?.toLowerCase() === "base64" ||
+      text.length > MAX_DIAGNOSTIC_BODY_CHARS
+    ) {
+      return;
+    }
+
+    const mimeType = content?.mimeType?.toLowerCase() ?? "";
+    const trimmedText = text.trimStart();
+    if (
+      !mimeType.includes("json") &&
+      !trimmedText.startsWith("{") &&
+      !trimmedText.startsWith("[")
+    ) {
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return;
+    }
+
+    const clues = new Set<string>();
+    let nodesVisited = 0;
+    const add = (value: string | null) => {
+      if (value && clues.size < MAX_DIAGNOSTIC_CANDIDATES) clues.add(value);
+    };
+    const inspectEmbeddedMetadata = (value: string) => {
+      const embeddedCode = value.match(
+        /"(?:code|errorCode|error_code)"\s*:\s*(\d{3,10})\b/i,
+      )?.[1];
+      if (embeddedCode) add(`Error code: ${embeddedCode}`);
+
+      const dependency = value.match(/\bDEPENDENCY=([A-Z][A-Z0-9_.-]{0,39})\b/i)?.[1];
+      if (dependency) add(`Dependency: ${safeShortText(dependency, 40)}`);
+
+      const downstreamStatus = value.match(/\bDOWNSTREAMSTATUSCODE=(\d{3})\b/i)?.[1];
+      if (downstreamStatus) add(`Downstream HTTP ${downstreamStatus}`);
+
+      const fieldPattern =
+        /\\?"([A-Za-z][A-Za-z0-9_.[\]-]{0,119})\\?"\s*:\s*\[/g;
+      for (const match of value.matchAll(fieldPattern)) {
+        const field = safeValidationField(match[1]);
+        add(field ? `Validation field: ${field}` : null);
+        if (clues.size >= MAX_DIAGNOSTIC_CANDIDATES) break;
+      }
+    };
+    const visit = (
+      value: unknown,
+      key = "",
+      insideValidation = false,
+      depth = 0,
+    ): void => {
+      if (
+        depth > 7 ||
+        nodesVisited >= MAX_DIAGNOSTIC_NODES ||
+        clues.size >= MAX_DIAGNOSTIC_CANDIDATES
+      ) {
+        return;
+      }
+      nodesVisited += 1;
+
+      if (typeof value === "string") {
+        inspectEmbeddedMetadata(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.slice(0, 20).forEach((item) => visit(item, key, insideValidation, depth + 1));
+        return;
+      }
+      if (!isRecord(value)) return;
+
+      for (const [childKey, childValue] of Object.entries(value)) {
+        const childInsideValidation =
+          insideValidation || VALIDATION_CONTAINER_KEY.test(childKey);
+        if (
+          insideValidation &&
+          !VALIDATION_CONTAINER_KEY.test(childKey) &&
+          !DIAGNOSTIC_CODE_KEY.test(childKey) &&
+          !DIAGNOSTIC_IDENTIFIER_KEY.test(childKey) &&
+          !DIAGNOSTIC_RETRY_KEY.test(childKey)
+        ) {
+          const field = safeValidationField(childKey);
+          if (field) add(`Validation field: ${field}`);
+        }
+
+        if (DIAGNOSTIC_CODE_KEY.test(childKey)) {
+          const code = safeDiagnosticCode(childValue);
+          if (code) add(`Error code: ${code}`);
+        } else if (DIAGNOSTIC_IDENTIFIER_KEY.test(childKey)) {
+          const identifier = safeDiagnosticIdentifier(childValue);
+          if (identifier) add(`${safeShortText(childKey, 40)}: ${identifier}`);
+        } else if (
+          DIAGNOSTIC_RETRY_KEY.test(childKey) &&
+          typeof childValue === "boolean"
+        ) {
+          add(`Retryable: ${childValue ? "yes" : "no"}`);
+        }
+
+        if (typeof childValue === "string") inspectEmbeddedMetadata(childValue);
+        visit(childValue, childKey, childInsideValidation, depth + 1);
+        if (clues.size >= MAX_DIAGNOSTIC_CANDIDATES) break;
+      }
+    };
+
+    visit(parsed);
+    if (!clues.size) return;
+
+    const redacted = redactUrl(entry.request?.url);
+    const url = redacted ? safeUrl(redacted) : null;
+    const method =
+      safeShortText(entry.request?.method ?? "GET", 16)
+        .toUpperCase()
+        .replace(/[^A-Z]/g, "") || "GET";
+    const endpoint = url
+      ? `${method} ${url.hostname}${url.pathname}`
+      : `${method} unknown-host/`;
+    results.push({
+      requestId: index + 1,
+      status,
+      endpoint,
+      clues: [...clues]
+        .sort((a, b) => {
+          const priority = (value: string) => {
+            if (value.startsWith("Validation field:")) return 100;
+            if (value.startsWith("Dependency:")) return 90;
+            if (value.startsWith("Downstream HTTP")) return 85;
+            if (/^Error code: \d+$/.test(value)) return 80;
+            if (/provider:/i.test(value)) return 75;
+            if (value.startsWith("Retryable:")) return 70;
+            if (value.startsWith("Error code:")) return 65;
+            return 60;
+          };
+          return priority(b) - priority(a) || a.localeCompare(b);
+        })
+        .slice(0, MAX_DIAGNOSTIC_CLUES_PER_REQUEST),
+    });
+  });
+
+  return results;
+}
+
 function toRequestRows(entries: HarEntry[]): RequestRow[] {
   return entries.map((entry, index) => {
     const url = safeUrl(entry.request?.url ?? "");
@@ -635,10 +859,16 @@ function isTelemetryEndpoint(row: RequestRow): boolean {
   );
 }
 
-function buildSuspects(rows: RequestRow[]): Suspect[] {
+function buildSuspects(
+  rows: RequestRow[],
+  diagnosticClues: DiagnosticClue[],
+): Suspect[] {
   const suspects: Array<Omit<Suspect, "rank"> & { score: number }> = [];
   const failures = rows.filter((row) => row.failure);
   const correlatedAuthRequestIds = new Set<number>();
+  const diagnosticByRequest = new Map(
+    diagnosticClues.map((item) => [item.requestId, item.clues]),
+  );
 
   const successfulAuthCallbacks = rows.filter(
     (row) =>
@@ -712,6 +942,9 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     group.forEach((row) => correlatedAuthRequestIds.add(row.id));
     const ordered = [...group].sort((a, b) => a.id - b.id);
     const status = ordered[0].status;
+    const safeErrorClues = [
+      ...new Set(group.flatMap((row) => diagnosticByRequest.get(row.id) ?? [])),
+    ].slice(0, 4);
     suspects.push({
       score: 88 + Math.min(8, group.length - 2),
       confidence: group.length >= 3 ? "high" : "medium",
@@ -729,6 +962,7 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
           .map((row) => `${row.method} ${row.path.split("?")[0]}`)
           .join(" → ")}`,
         `HTTP ${status}`,
+        ...safeErrorClues,
       ],
     });
   }
@@ -755,6 +989,9 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
         normalizedEndpointPath(row.path) === normalizedPath,
     );
     const telemetry = group.every(isTelemetryEndpoint);
+    const safeErrorClues = [
+      ...new Set(group.flatMap((row) => diagnosticByRequest.get(row.id) ?? [])),
+    ].slice(0, 4);
     const baseExplanation =
       status === 0
         ? "The browser recorded no HTTP response. Common causes are CORS, DNS, TLS, an aborted request, an extension, or lost connectivity."
@@ -806,6 +1043,7 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
               ? ["Telemetry/analytics endpoint"]
               : []),
         `${formatDuration(sample.duration)} observed duration`,
+        ...safeErrorClues,
       ],
     });
   }
@@ -910,6 +1148,7 @@ function buildReport(
   har: HarFile,
   rows: RequestRow[],
   suspects: Suspect[],
+  diagnosticClues: DiagnosticClue[],
   findings: Finding[],
   metrics: {
     totalBytes: number;
@@ -940,6 +1179,12 @@ function buildReport(
           `${row.host}${row.path.split("?")[0]}`,
         )}\` | ${formatDuration(row.duration)} |`,
     );
+  const safeErrorEvidence = diagnosticClues.map(
+    (item) =>
+      `- ${markdownCode(item.endpoint)} — HTTP ${item.status}: ${item.clues
+        .map(markdownCode)
+        .join("; ")}`,
+  );
 
   const markdown = `# ${title}
 
@@ -974,6 +1219,12 @@ ${suspect.evidence.map((item) => `- ${item}`).join("\n")}`,
 |---|---:|---|---:|
 ${topEvidence.length ? topEvidence.join("\n") : "| — | — | No HTTP failures captured | — |"}
 
+## Safely extracted error clues
+
+${safeErrorEvidence.length ? safeErrorEvidence.join("\n") : "No bounded JSON error metadata was extracted."}
+
+Only short error identifiers, retryability flags, dependency names, downstream statuses, and validation field paths are retained here. The original request and response bodies remain stripped.
+
 ## Capture context
 
 - Source: ${markdownCode(sourceName)}
@@ -992,7 +1243,7 @@ ${topEvidence.length ? topEvidence.join("\n") : "| — | — | No HTTP failures 
 
 ## Privacy
 
-Generated locally by ReqRescue from the same sanitized evidence model used by the export and preview. Request and response bodies are stripped by default. Review the output before sharing because no automated process can identify every domain-specific identifier.
+Generated locally by ReqRescue from the same sanitized evidence model used by the export and preview. Request and response bodies are stripped by default; only the bounded error metadata described above may be retained in the report. Review the output before sharing because no automated process can identify every domain-specific identifier.
 
 ---
 
@@ -1062,7 +1313,8 @@ function validateEntry(entry: unknown, index: number): void {
 export function parseHar(text: string): HarFile {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    const normalized = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+    parsed = JSON.parse(normalized);
   } catch {
     throw new Error("This file is not valid JSON.");
   }
@@ -1087,6 +1339,7 @@ export function parseHar(text: string): HarFile {
 
 export function analyzeHar(har: HarFile, sourceName: string): Analysis {
   const findings = collectFindings(har);
+  const diagnosticClues = extractDiagnosticClues(har.log.entries);
   const sanitized = sanitizeHar(har);
   const rows = toRequestRows(sanitized.log.entries);
   const durations = rows.map((row) => row.duration);
@@ -1104,17 +1357,25 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
       ? Math.max(0, latestEnd - earliestStart)
       : durations.reduce((sum, value) => sum + value, 0);
   const p95Duration = percentile(durations, 0.95);
-  const suspects = buildSuspects(rows);
+  const suspects = buildSuspects(rows, diagnosticClues);
   const totalBytes = rows.reduce((sum, row) => sum + row.size, 0);
   const domainCount = new Set(rows.map((row) => row.host)).size;
   const findingCount = findings.reduce((sum, finding) => sum + finding.count, 0);
   const safeSourceName = sanitizeSourceName(sourceName);
-  const report = buildReport(safeSourceName, sanitized, rows, suspects, findings, {
-    totalBytes,
-    totalDuration,
-    p95Duration,
-    domainCount,
-  });
+  const report = buildReport(
+    safeSourceName,
+    sanitized,
+    rows,
+    suspects,
+    diagnosticClues,
+    findings,
+    {
+      totalBytes,
+      totalDuration,
+      p95Duration,
+      domainCount,
+    },
+  );
   const criticalCount = findings
     .filter((item) => item.severity === "critical")
     .reduce((sum, item) => sum + item.count, 0);
@@ -1138,6 +1399,7 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
     findingCount,
     suspects,
     requests: rows,
+    diagnosticClues,
     markdown: report.markdown,
     aiPrompt: report.aiPrompt,
     sanitized,
