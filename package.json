@@ -15,7 +15,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "pretest": "node scripts/prepare-e2e.mjs",
-    "test:unit": "tsx --test tests/trace-engine.test.ts tests/license.test.ts tests/event-route.test.ts",
+    "test:unit": "tsx --test tests/trace-engine.test.ts tests/event-route.test.ts",
     "test:render": "npm run build && node --test tests/rendered-html.test.mjs",
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:render && npm run test:e2e",

@@ -54,8 +54,7 @@ export type HarFile = {
 };
 
 export const MAX_HAR_ENTRIES = 50_000;
-export const FREE_MAX_FILE_BYTES = 25 * 1024 * 1024;
-export const SUPPORTER_MAX_FILE_BYTES = 75 * 1024 * 1024;
+export const MAX_HAR_FILE_BYTES = 75 * 1024 * 1024;
 
 export type FindingKind =
   | "authorization"

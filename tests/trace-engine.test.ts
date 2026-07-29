@@ -9,6 +9,7 @@ import {
   parseHar,
   sanitizeHar,
 } from "../app/trace-engine";
+import { compareAnalyses } from "../app/trace-compare";
 
 function entry(
   url: string,
@@ -359,4 +360,49 @@ test("uses evidence volume before assigning high confidence", () => {
   );
   assert.equal(repeated.suspects[0].confidence, "high");
   assert.match(repeated.suspects[0].evidence.join(" "), /3 matching failed requests/i);
+});
+
+test("compares two HARs and ranks a missing signed query key with a new failure", () => {
+  const baseline = analyzeHar(
+    har([
+      {
+        ...entry(
+          "https://uploads.example.com/singleFileUpload?tk=one&ref=signed&uuid=abc",
+          200,
+        ),
+        request: {
+          method: "POST",
+          url: "https://uploads.example.com/singleFileUpload?tk=one&ref=signed&uuid=abc",
+          headers: [],
+        },
+      },
+    ]),
+    "working.har",
+  );
+  const changed = analyzeHar(
+    har([
+      {
+        ...entry(
+          "https://uploads.example.com/singleFileUpload?tk=two&uuid=abc",
+          400,
+        ),
+        request: {
+          method: "POST",
+          url: "https://uploads.example.com/singleFileUpload?tk=two&uuid=abc",
+          headers: [],
+        },
+      },
+    ]),
+    "broken.har",
+  );
+
+  const comparison = compareAnalyses(baseline, changed);
+
+  assert.equal(comparison.changes[0].kind, "query");
+  assert.equal(comparison.changes[0].confidence, "high");
+  assert.match(comparison.changes[0].title, /ref.*disappears/i);
+  assert.match(comparison.changes[0].evidence.join(" "), /200.*400/);
+  assert.match(comparison.markdown, /Capture A — baseline/);
+  assert.match(comparison.markdown, /0 HAR bytes uploaded/);
+  assert.doesNotMatch(comparison.markdown, /signed|tk=one|tk=two/);
 });

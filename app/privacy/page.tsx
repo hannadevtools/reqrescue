@@ -43,13 +43,12 @@ export default function PrivacyPage() {
           or personal data in feedback.
         </p>
 
-        <h2>Supporter verification and local storage</h2>
+        <h2>Local storage</h2>
         <p>
-          If you verify an honorware purchase, your entered license key is sent
-          directly from your browser to Gumroad. ReqRescue does not receive the
-          key. The unlock flag, pseudonymous session identifier, and any saved
-          incident briefs remain in this browser&apos;s local storage until you
-          clear site data.
+          The pseudonymous session identifier and any incident briefs you
+          choose to save remain in this browser&apos;s local storage until you
+          clear site data. ReqRescue has no account system, payment
+          verification, or cloud case storage.
         </p>
 
         <h2>Hosting records</h2>
@@ -68,7 +67,7 @@ export default function PrivacyPage() {
           fields, but you must review a sanitized export before sharing it.
         </p>
 
-        <p className="legal-updated">Last updated: July 27, 2026.</p>
+        <p className="legal-updated">Last updated: July 29, 2026.</p>
       </article>
     </main>
   );

@@ -16,6 +16,7 @@ const structuredData = {
     "A browser-local tool that turns a failed web session into ranked evidence, removes common secrets, and creates a clean HAR plus a developer-ready bug report.",
   featureList: [
     "Local browser-only HAR analysis",
+    "Local A/B comparison of two HAR captures",
     "Cookie, token, email, IP address, and request-body redaction",
     "Evidence-backed failure ranking",
     "Sanitized HAR export",
@@ -38,11 +39,12 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "ReqRescue — Turn browser failures into safe bug reports",
   description:
-    "A website broke? Drop its browser network recording (HAR), find likely failure points, remove common secrets, and create a ready-to-send bug report. Free and local.",
+    "A website broke? Analyze or compare its browser network recordings (HAR), find likely failure points, remove common secrets, and create a ready-to-send bug report. Free and local.",
   applicationName: "ReqRescue",
   keywords: [
     "HAR analyzer",
     "HAR file analyzer",
+    "compare HAR files",
     "network debugging",
     "HAR sanitizer",
     "sanitize HAR file",

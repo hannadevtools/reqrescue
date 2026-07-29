@@ -38,11 +38,14 @@ test("server-renders the ReqRescue product shell", async () => {
   assert.match(html, /Nothing is uploaded/);
   assert.match(html, /Run a 15-second demo — no HAR needed/);
   assert.match(html, /Need a HAR\? Export one in 3 steps/);
+  assert.match(html, /Compare two HARs \(A\/B\)/);
   assert.match(html, /ReqRescue, in plain English/);
   assert.match(html, /Support, QA, developers, and technical founders/);
-  assert.match(html, /Support ReqRescue · \$12/);
-  assert.match(html, /Voluntary honorware/);
-  assert.match(html, /No account or subscription/);
+  assert.match(html, /Saved an hour\? Help a cat instead/);
+  assert.match(html, /Israel Cat Lovers/);
+  assert.match(html, /S\.O\.S Pets Israel/);
+  assert.match(html, /No paywall, license key, account, subscription/);
+  assert.doesNotMatch(html, /Gumroad|Support ReqRescue · \$12|honorware/i);
   assert.match(html, /github\.com\/hannadevtools\/reqrescue/);
   assert.match(
     html,
