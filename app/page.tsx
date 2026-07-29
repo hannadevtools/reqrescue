@@ -83,8 +83,9 @@ function acquisitionSource() {
   const params = new URLSearchParams(window.location.search);
   const source = params.get("utm_source");
   const medium = params.get("utm_medium");
+  const campaign = params.get("utm_campaign");
   if (source) {
-    return [source, medium]
+    return [source, medium, campaign]
       .filter(Boolean)
       .map((value) => value!.replace(/[^a-z0-9_-]/gi, "").slice(0, 40))
       .filter(Boolean)
@@ -1857,6 +1858,7 @@ export default function Home() {
       activeJobRef.current = job;
       setBusy(true);
       setBusyMessage("Reading the HAR locally…");
+      void track("analysis_started", "file");
       try {
         const buffer = await file.arrayBuffer();
         if (job.cancelled) return;
@@ -1928,6 +1930,7 @@ export default function Home() {
       activeJobRef.current = job;
       setBusy(true);
       setBusyMessage("Reading capture A locally…");
+      void track("comparison_started", "file");
 
       try {
         const [baselineBuffer, changedBuffer] = await Promise.all([
@@ -1992,6 +1995,7 @@ export default function Home() {
     setBusy(true);
     setBusyMessage("Building the synthetic local demo…");
     setError("");
+    void track("analysis_started", "demo");
     job.timer = window.setTimeout(() => {
       if (job.cancelled) return;
       try {

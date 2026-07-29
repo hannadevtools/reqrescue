@@ -9,9 +9,11 @@ let recentGlobalEvents: number[] = [];
 
 const ALLOWED_EVENTS = new Set([
   "page_view",
+  "analysis_started",
   "analysis_complete",
   "analysis_error",
   "analysis_cancelled",
+  "comparison_started",
   "comparison_complete",
   "comparison_error",
   "comparison_copy_report",

@@ -18,6 +18,11 @@ async function openApp(page: Page, path = "/") {
 test("opens a focused comparison journey from the campaign deep link", async ({
   page,
 }) => {
+  const events: Array<{ event?: string; detail?: string }> = [];
+  await page.route("**/api/event", async (route) => {
+    events.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
   await openApp(
     page,
     "/?mode=compare&utm_source=github&utm_medium=issue_help&utm_campaign=compare",
@@ -31,6 +36,9 @@ test("opens a focused comparison journey from the campaign deep link", async ({
     page.getByRole("button", { name: "Compare two HARs (A/B)" }),
   ).toHaveCount(0);
   await expect(page.getByText(/baseline first, changed or broken/i)).toBeVisible();
+  await expect
+    .poll(() => events.find((event) => event.event === "page_view")?.detail)
+    .toBe("github/issue_help/compare");
 });
 
 test("runs the synthetic demo and exposes only evidence-based results", async ({
@@ -64,12 +72,20 @@ test("runs the synthetic demo and exposes only evidence-based results", async ({
 test("accepts a HAR file, previews sanitized data, and exports safe files", async ({
   page,
 }) => {
+  const events: Array<{ event?: string; detail?: string }> = [];
+  await page.route("**/api/event", async (route) => {
+    events.push(route.request().postDataJSON());
+    await route.fulfill({ status: 204 });
+  });
   await openApp(page);
   await page.locator('input[type="file"]').first().setInputFiles("tests/fixtures/qa-sample.har");
 
   await expect(
     page.getByRole("heading", { name: /Network failure: 403/i }),
   ).toBeVisible();
+  await expect
+    .poll(() => events.map((event) => event.event))
+    .toEqual(expect.arrayContaining(["analysis_started", "analysis_complete"]));
   await page.getByText("Preview sanitized data").click();
   await expect(page.locator(".sanitized-preview pre")).toContainText("[REDACTED");
 
