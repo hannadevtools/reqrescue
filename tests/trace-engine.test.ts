@@ -198,6 +198,30 @@ test("redacts private IPv6 hosts and unsupported URL schemes", () => {
   assert.match(output, /\[REDACTED_UNSUPPORTED_URL\]/);
 });
 
+test("preserves ISO timestamps while redacting IPv6 text", () => {
+  const timestamp = "2026-07-29T10:45:59.780Z";
+  const clean = sanitizeHar({
+    log: {
+      version: "1.2",
+      creator: {
+        name: `capture ${timestamp} from 2001:db8::1`,
+        version: "1",
+      },
+      entries: [
+        {
+          ...entry("https://example.com/status", 200),
+          startedDateTime: timestamp,
+        },
+      ],
+    },
+  });
+  const output = JSON.stringify(clean);
+
+  assert.match(output, new RegExp(timestamp.replace(/[.]/g, "\\.")));
+  assert.doesNotMatch(output, /2001:db8::1/);
+  assert.match(output, /\[REDACTED_IP\]/);
+});
+
 test("rejects malformed nested HAR structures with controlled messages", () => {
   assert.throws(
     () => parseHar('{"log":{"entries":[null]}}'),

@@ -133,7 +133,12 @@ const BEARER = /\bBearer\s+[a-zA-Z0-9._~+/=-]{8,}\b/gi;
 const BASIC = /\bBasic\s+[a-zA-Z0-9+/=]{8,}\b/gi;
 const COMMON_SECRET =
   /\b(?:sk_live_[a-zA-Z0-9]{12,}|sk_test_[a-zA-Z0-9]{12,}|gh[pousr]_[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b/g;
-const IPV6 = /\b[0-9A-F]{0,4}(?::[0-9A-F]{0,4}){2,7}\b/gi;
+// Match either a full eight-hextet address or a compressed address containing
+// "::". Requiring one of those two valid IPv6 shapes prevents ordinary
+// colon-separated values such as ISO timestamps (10:45:59) from being
+// misclassified and redacted as IP addresses.
+const IPV6 =
+  /(?<![0-9A-F:])(?:(?:[0-9A-F]{1,4}:){7}[0-9A-F]{1,4}|(?:[0-9A-F]{0,4}:){1,7}:[0-9A-F]{0,4})(?![0-9A-F:])/gi;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HIGH_ENTROPY_SEGMENT = /^[a-z0-9_-]{24,}$/i;
 const PRIVATE_HOST =
