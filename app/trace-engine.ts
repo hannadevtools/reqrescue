@@ -607,14 +607,96 @@ function normalizedEndpointPath(path: string): string {
     .join("/");
 }
 
+function pathWithoutQuery(row: RequestRow): string {
+  return row.path.split("?")[0];
+}
+
+function isAuthCallback(row: RequestRow): boolean {
+  return /(?:^|\/)(?:auth|oauth|login|signin|sign-in)(?:\/[^/]+)*\/callback(?:\/|$)/i.test(
+    pathWithoutQuery(row),
+  );
+}
+
+function isLoginEntry(row: RequestRow): boolean {
+  const path = pathWithoutQuery(row);
+  return (
+    !isAuthCallback(row) &&
+    /(?:^|\/)(?:auth\/)?(?:login|signin|sign-in)(?:\/|$)/i.test(path)
+  );
+}
+
+function isTelemetryEndpoint(row: RequestRow): boolean {
+  return (
+    /(?:^|\.)(?:sentry\.io|google-analytics\.com|googletagmanager\.com|segment\.io|amplitude\.com|mixpanel\.com|posthog\.com|adrsbl\.io|safary\.club|doubleclick\.net)$/i.test(
+      row.host,
+    ) ||
+    /(?:^|\/)(?:g\/collect|collect|pagead|ccm\/collect|conversions?)(?:\/|$)/i.test(
+      pathWithoutQuery(row),
+    )
+  );
+}
+
 function buildSuspects(rows: RequestRow[]): Suspect[] {
   const suspects: Array<Omit<Suspect, "rank"> & { score: number }> = [];
   const failures = rows.filter((row) => row.failure);
   const correlatedAuthRequestIds = new Set<number>();
 
+  const successfulAuthCallbacks = rows.filter(
+    (row) =>
+      !row.failure &&
+      row.method !== "OPTIONS" &&
+      row.status >= 200 &&
+      row.status < 300 &&
+      isAuthCallback(row),
+  );
+  const callbackToLoginPairs = successfulAuthCallbacks.flatMap((callback) => {
+    const callbackTime = Date.parse(callback.startedAt);
+    const nextLogin = rows.find((candidate) => {
+      if (candidate.id <= callback.id || candidate.failure || !isLoginEntry(candidate)) {
+        return false;
+      }
+      const loginTime = Date.parse(candidate.startedAt);
+      return (
+        Number.isFinite(callbackTime) &&
+        Number.isFinite(loginTime) &&
+        loginTime >= callbackTime &&
+        loginTime - callbackTime <= 120_000
+      );
+    });
+    return nextLogin ? [{ callback, nextLogin }] : [];
+  });
+
+  if (callbackToLoginPairs.length) {
+    suspects.push({
+      score: 98,
+      confidence: callbackToLoginPairs.length >= 2 ? "high" : "medium",
+      title: "Login state was not retained after a successful callback",
+      explanation:
+        "The authentication callback succeeded, but the capture returned to a login route shortly afterward. This pattern points to session persistence, account restoration, or the post-login handoff rather than rejected credentials.",
+      nextStep:
+        "Compare cookie and local/session-storage state immediately before navigation, then instrument callback success, account restoration, and the destination page's logged-in-state decision as separate events.",
+      evidence: [
+        `${callbackToLoginPairs.length} successful auth callback${callbackToLoginPairs.length === 1 ? "" : "s"} followed by a login-page revisit`,
+        `Sequence: ${callbackToLoginPairs
+          .slice(0, 3)
+          .map(
+            ({ callback, nextLogin }) =>
+              `${callback.status} ${pathWithoutQuery(callback)} → ${nextLogin.status} ${pathWithoutQuery(nextLogin)}`,
+          )
+          .join(" | ")}`,
+        `Revisit delay${callbackToLoginPairs.length === 1 ? "" : "s"}: ${callbackToLoginPairs
+          .slice(0, 3)
+          .map(({ callback, nextLogin }) =>
+            formatDuration(Date.parse(nextLogin.startedAt) - Date.parse(callback.startedAt)),
+          )
+          .join(", ")}`,
+      ],
+    });
+  }
+
   const groupedFailures = new Map<string, RequestRow[]>();
   for (const row of failures) {
-    const key = `${row.status}:${row.host}:${normalizedEndpointPath(row.path)}`;
+    const key = `${row.status}:${row.method}:${row.host}:${normalizedEndpointPath(row.path)}`;
     groupedFailures.set(key, [...(groupedFailures.get(key) ?? []), row]);
   }
 
@@ -656,15 +738,42 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     if (group.every((row) => correlatedAuthRequestIds.has(row.id))) continue;
     const sample = group[0];
     const status = sample.status;
-    const explanation =
+    const lastFailureId = Math.max(...group.map((row) => row.id));
+    const normalizedPath = normalizedEndpointPath(sample.path);
+    const laterSuccess = rows.find(
+      (row) =>
+        row.id > lastFailureId &&
+        !row.failure &&
+        row.method === sample.method &&
+        row.host === sample.host &&
+        normalizedEndpointPath(row.path) === normalizedPath,
+    );
+    const fallbackSuccess = rows.find(
+      (row) =>
+        !row.failure &&
+        row.method === sample.method &&
+        row.host !== sample.host &&
+        normalizedEndpointPath(row.path) === normalizedPath,
+    );
+    const telemetry = group.every(isTelemetryEndpoint);
+    const baseExplanation =
       status === 0
         ? "The browser recorded no HTTP response. Common causes are CORS, DNS, TLS, an aborted request, an extension, or lost connectivity."
         : FAILURE_EXPLANATIONS[status] ??
           (status >= 500
             ? "The request reached the service and failed on the server side."
             : "The request completed with an unsuccessful HTTP status.");
+    const explanation = laterSuccess
+      ? `${baseExplanation} The same endpoint succeeded later in this capture, so treat this as a recovered retry unless its timing matches the user-visible failure.`
+      : fallbackSuccess
+        ? `${baseExplanation} Another host serving the same normalized endpoint succeeded, which suggests fallback or partial backend availability rather than a total flow failure.`
+        : telemetry
+          ? `${baseExplanation} This is a telemetry or analytics endpoint, so it is unlikely to be the root cause of the product flow.`
+          : baseExplanation;
     const confidence: Suspect["confidence"] =
-      group.length >= 3
+      laterSuccess || fallbackSuccess || telemetry
+        ? "low"
+        : group.length >= 3
         ? "high"
         : group.length >= 2 || status >= 500 || status === 401 || status === 403
           ? "medium"
@@ -677,14 +786,26 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
     suspects.push({
       score:
         (status >= 500 ? 84 : status === 401 || status === 403 ? 80 : status === 0 ? 74 : 68) +
-        Math.min(9, group.length - 1),
+        Math.min(9, group.length - 1) -
+        (laterSuccess ? 38 : 0) -
+        (fallbackSuccess ? 25 : 0) -
+        (telemetry ? 40 : 0),
       confidence,
-      title: `${status || "Network"} failure at ${endpointLabel(sample)}`,
+      title: `${laterSuccess ? "Recovered " : ""}${status || "Network"} failure at ${endpointLabel(sample)}`,
       explanation,
-      nextStep,
+      nextStep: laterSuccess
+        ? "Compare the failed attempt with the later successful request and investigate it only if the retry delay or intermediate state matches the reported symptom."
+        : nextStep,
       evidence: [
         `${group.length} matching failed request${group.length === 1 ? "" : "s"}`,
         status ? `HTTP ${status}` : "No HTTP status returned",
+        ...(laterSuccess
+          ? [`Later recovered with HTTP ${laterSuccess.status} at the same endpoint`]
+          : fallbackSuccess
+            ? [`Fallback host ${fallbackSuccess.host} returned HTTP ${fallbackSuccess.status}`]
+            : telemetry
+              ? ["Telemetry/analytics endpoint"]
+              : []),
         `${formatDuration(sample.duration)} observed duration`,
       ],
     });
@@ -700,7 +821,7 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
   const successfulP95 = percentile(successfulDurations, 0.95);
   const slowThreshold = Math.max(1000, successfulP95, medianDuration * 3);
   const slow = rows
-    .filter((row) => !row.failure && row.duration >= slowThreshold)
+    .filter((row) => !row.failure && row.status !== 101 && row.duration >= slowThreshold)
     .sort((a, b) => b.duration - a.duration)
     .slice(0, 2);
   for (const row of slow) {
@@ -721,11 +842,11 @@ function buildSuspects(rows: RequestRow[]): Suspect[] {
   }
 
   const redirectsByHost = new Map<string, RequestRow[]>();
-  for (const row of rows.filter((item) => item.status >= 300 && item.status < 400)) {
+  for (const row of rows.filter((item) => item.status >= 300 && item.status < 400 && item.status !== 304)) {
     redirectsByHost.set(row.host, [...(redirectsByHost.get(row.host) ?? []), row]);
   }
   for (const [host, group] of redirectsByHost) {
-    if (group.length >= 3) {
+    if (group.length >= 3 && !group.every(isTelemetryEndpoint)) {
       suspects.push({
         score: 62 + Math.min(group.length, 10),
         confidence: "medium",
@@ -799,9 +920,9 @@ function buildReport(
   },
 ): { title: string; markdown: string; aiPrompt: string } {
   const failures = rows.filter((row) => row.failure);
-  const firstFailure = failures[0];
-  const title = firstFailure
-    ? `Network failure: ${firstFailure.status || "no response"} at ${endpointLabel(firstFailure)}`
+  const primarySuspect = suspects[0];
+  const title = failures.length && primarySuspect
+    ? `Network failure: ${primarySuspect.title}`
     : `Network trace review: ${rows.length} requests, no HTTP failure`;
   const browser = har.log.browser
     ? `${har.log.browser.name ?? "Unknown"} ${har.log.browser.version ?? ""}`.trim()
@@ -1009,7 +1130,7 @@ export function analyzeHar(har: HarFile, sourceName: string): Analysis {
     failedRequests: rows.filter((row) => row.failure).length,
     clientErrors: rows.filter((row) => row.status >= 400 && row.status < 500).length,
     serverErrors: rows.filter((row) => row.status >= 500).length,
-    redirects: rows.filter((row) => row.status >= 300 && row.status < 400).length,
+    redirects: rows.filter((row) => row.status >= 300 && row.status < 400 && row.status !== 304).length,
     totalBytes,
     totalDuration,
     p95Duration,

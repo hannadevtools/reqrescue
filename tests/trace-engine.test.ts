@@ -52,6 +52,88 @@ test("ranks the repeated auth failure above an unrelated telemetry failure", () 
   assert.match(analysis.markdown, /0 HAR bytes uploaded/);
 });
 
+test("detects a successful auth callback followed by a return to login", () => {
+  const sentryFailure = {
+    ...entry("https://errors.ingest.us.sentry.io/api/1/envelope/", 429),
+    startedDateTime: "2026-07-27T08:00:00.000Z",
+    request: {
+      method: "POST",
+      url: "https://errors.ingest.us.sentry.io/api/1/envelope/",
+      headers: [],
+    },
+  };
+  const failedCallback = {
+    ...entry("https://wallet.example.com/api/login/email/callback", 401),
+    startedDateTime: "2026-07-27T08:00:05.000Z",
+    request: {
+      method: "POST",
+      url: "https://wallet.example.com/api/login/email/callback",
+      headers: [],
+    },
+  };
+  const successfulCallback = {
+    ...entry("https://wallet.example.com/api/login/email/callback", 200),
+    startedDateTime: "2026-07-27T08:00:10.000Z",
+    request: {
+      method: "POST",
+      url: "https://wallet.example.com/api/login/email/callback",
+      headers: [],
+    },
+  };
+  const callbackPreflight = {
+    ...entry("https://wallet.example.com/api/login/email/callback", 204),
+    startedDateTime: "2026-07-27T08:00:10.001Z",
+    request: {
+      method: "OPTIONS",
+      url: "https://wallet.example.com/api/login/email/callback",
+      headers: [],
+    },
+  };
+  const cacheValidation = {
+    ...entry("https://app.example.com/app.js", 304),
+    startedDateTime: "2026-07-27T08:00:11.000Z",
+  };
+  const websocketUpgrade = {
+    ...entry("https://app.example.com/socket", 101, 60_000),
+    startedDateTime: "2026-07-27T08:00:11.500Z",
+  };
+  const telemetryRedirects = Array.from({ length: 4 }, (_, index) => ({
+    ...entry("https://googleads.g.doubleclick.net/pagead/conversion/", 302),
+    startedDateTime: `2026-07-27T08:00:1${2 + index}.000Z`,
+  }));
+  const returnedToLogin = {
+    ...entry("https://app.example.com/auth/login", 200),
+    startedDateTime: "2026-07-27T08:00:22.000Z",
+  };
+
+  const analysis = analyzeHar(
+    har([
+      sentryFailure,
+      failedCallback,
+      successfulCallback,
+      callbackPreflight,
+      cacheValidation,
+      websocketUpgrade,
+      ...telemetryRedirects,
+      returnedToLogin,
+    ]),
+    "auth-loop.har",
+  );
+
+  assert.match(analysis.suspects[0].title, /login state was not retained/i);
+  assert.match(analysis.suspects[0].evidence.join(" "), /1 successful auth callback/i);
+  assert.match(analysis.suspects[0].evidence.join(" "), /12(?:\.0)? s/i);
+  assert.match(analysis.title, /login state was not retained/i);
+  assert.equal(analysis.redirects, 4);
+  assert.ok(
+    analysis.suspects.every((suspect) => !/doubleclick|socket/i.test(suspect.title)),
+  );
+  assert.ok(
+    analysis.suspects.findIndex((suspect) => /recovered 401/i.test(suspect.title)) >
+      analysis.suspects.findIndex((suspect) => /login state was not retained/i.test(suspect.title)),
+  );
+});
+
 test("removes the known secrets and PII in the demo HAR", () => {
   const raw = buildDemoHar();
   const clean = JSON.stringify(sanitizeHar(raw));

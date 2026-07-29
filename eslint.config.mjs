@@ -14,6 +14,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "work/**",
     ".tools/**",
+    ".tmp_reqrescue/**",
     "next-env.d.ts",
   ]),
   {
